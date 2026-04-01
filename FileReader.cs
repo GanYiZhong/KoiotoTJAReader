@@ -40,6 +40,10 @@ namespace ZhongTaiko.TJAReader
                     return null;
                 }
 
+                // Resolve folder metadata (genre.ini, box.def, folder.json)
+                var folderPath = Path.GetDirectoryName(filePath);
+                var folderMeta = FolderMetadataResolver.Resolve(folderPath);
+
                 var result = new SongSelectMetadata
                 {
                     FilePath = filePath,
