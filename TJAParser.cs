@@ -68,7 +68,24 @@ namespace ZhongTaiko.TJAReader
                             currentCourse = "oni";
                             _courseInfo[currentCourse] = new TJACourse { Difficulty = currentCourse, Level = 1 };
                         }
+
+                        // Preserve BALLOON, SCOREINIT, SCOREDIFF from pre-#START metadata
+                        var preservedBalloon = currentCourseData?.Balloon;
+                        var preservedScoreinit = currentCourseData?.Scoreinit;
+                        var preservedScorediff = currentCourseData?.Scorediff;
+
                         currentCourseData = new TJACourseData { Measures = new List<string[]>() };
+
+                        // Restore preserved metadata
+                        if (preservedBalloon != null)
+                            currentCourseData.Balloon = preservedBalloon;
+                        if (preservedScoreinit > 0)
+                            currentCourseData.Scoreinit = preservedScoreinit;
+                        if (preservedScorediff > 0)
+                            currentCourseData.Scorediff = preservedScorediff;
+
+                        System.Diagnostics.Debug.WriteLine($"[TJAReader] #START: Preserved BALLOON={preservedBalloon?.Length ?? 0} entries, SCOREINIT={preservedScoreinit}, SCOREDIFF={preservedScorediff}");
+
                         currentMeasure = new List<string>();
                         continue;
                     }
