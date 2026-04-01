@@ -548,7 +548,11 @@ namespace ZhongTaiko.TJAReader
 
             private static double GetMeasureDuration(Measure measure, double bpm)
             {
-                return measure.GetRate() / bpm * 1000 * 1000.0;
+                // Prevent division by zero
+                if (bpm <= 0) bpm = 120.0;
+                var measureRate = measure.GetRate();
+                if (measureRate <= 0) measureRate = 1;
+                return measureRate / bpm * 1000 * 1000.0;
             }
 
             private static Notes GetNotesFromChar(char ch)
