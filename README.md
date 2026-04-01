@@ -1,106 +1,129 @@
-# TJA Reader Plugin for Koioto
+# KoiotoTJAReader
 
-这是一个Koioto插件，允许直接读取 `.tja` 文件，而无需将其转换为 `.tcc/.tci` 格式。
+A direct TJA format reader plugin for Koioto rhythm game, eliminating the need for conversion to TCC/TCI format.
 
-## 功能
+**Languages:** [English](#koiototjareader) | [繁體中文](README.zh-TW.md) | [日本語](README.ja.md)
 
-- ✅ 直接读取 `.tja` 文件
-- ✅ 解析所有TJA元数据（标题、字幕、艺术家、BPM等）
-- ✅ 支持多个难易度（Easy/Normal/Hard/Oni/Edit）
-- ✅ 支持气球音符（Balloon）
-- ✅ 支持所有主要命令（#bpm, #scroll, #gogobegin/end, #measure, #delay）
-- ✅ 无需预处理或转换
+## Features
 
-## 构建
+✅ **Direct .tja File Reading** - No conversion required  
+✅ **Complete Metadata Support** - Title, artist, BPM, offset, preview time  
+✅ **Multiple Difficulty Levels** - Easy, Normal, Hard, Oni, Edit (Ura)  
+✅ **Scoring System Support**
+  - SCOREMODE: 0 (AC 1-7), 1 (AC 8-14), 2 (AC 0)
+  - SCOREINIT and SCOREDIFF per difficulty
+  - Complete score calculation implementation
+
+✅ **Full Chart Command Support**
+  - #BPMCHANGE - BPM changes mid-chart
+  - #SCROLL - Scroll speed adjustments
+  - #MEASURE - Time signature changes
+  - #GOGOSTART / #GOGOEND - Go-Go time sections
+  - #DELAY - Chart delays
+
+✅ **Balloon/Kusudama Support** - With configurable hit targets  
+✅ **Empty Measure Handling** - Preserves all measure types  
+
+## Installation
+
+### Quick Start
+
+1. **Download the DLL**
+   - Get `TJAReader.dll` from the [Releases](../../releases) page
+
+2. **Install to Koioto**
+   ```bash
+   Copy TJAReader.dll to C:\path\to\Koioto\Plugins\
+   ```
+
+3. **Restart Koioto**
+   - Koioto will automatically load the plugin
+   - .tja files will now appear in song selection
+
+### Build from Source
 
 ```bash
-# 在Visual Studio中打开TJAReader.csproj
-# 或使用命令行
-cd D:\koioto\TJAReader
-msbuild TJAReader.csproj /p:Configuration=Release
+# Clone the repository
+git clone https://github.com/GanYiZhong/KoiotoTJAReader.git
+cd KoiotoTJAReader/TJAReader
+
+# Build the project
+dotnet build TJAReader.csproj -c Release
 ```
 
-输出DLL将放在 `Plugins/` 目录中。
+## Usage
 
-## 使用
+### In Koioto
 
-1. 将编译后的 `TJAReader.dll` 放入 `Plugins/` 目录
-2. 重启Koioto
-3. 现在可以直接加载 `.tja` 文件
+Once installed, .tja files will load directly like any other chart format.
 
-## 架构
+### Programmatic Access
 
-### FileReader.cs
-- 主插件入口点
-- 实现 `IChartReadable` 接口
-- 处理元数据读取和播放请求
+```csharp
+using ZhongTaiko.TJAReader;
 
-### TJAParser.cs
-- TJA格式解析器
-- 将TJA语法转换为Koioto内部格式
-- CourseParser：将TJA课程数据转换为Playable对象
+// Get scoring configuration
+var fileReader = new FileReader();
+var scoring = fileReader.GetScoringConfig("path/to/song.tja", Koioto.Support.FileReader.Courses.Oni);
 
-## 支持的功能
+// Calculate points based on combo
+int points = scoring.CalculatePoints(50);
+int finalScore = ScoringConfig.ApplyDivision(points);
+```
 
-### 元数据
-- TITLE - 歌曲标题
-- SUBTITLE - 副标题
-- ARTIST - 艺术家
-- CREATOR - 谱师
-- BPM - 节拍每分钟
-- WAVE - 音频文件路径
-- OFFSET - 音频偏移（秒）
-- DEMOSTART - 预览开始时间
-- ALBUMART - 专辑艺术
+## Documentation
 
-### 命令
-- `#BPMCHANGE` - 改变BPM
-- `#MEASURE` / `#TSIGN` - 改变时间签名
-- `#GOGOSTART` / `#GOGOEND` - Go-Go时间段
-- `#SCROLL` - 改变滚动速度
-- `#DELAY` - 延迟
-- `#MEASURE` - 时间签名变更
+- [SCORING_IMPORT_GUIDE.md](../SCORING_IMPORT_GUIDE.md) - Scoring system integration guide
+- [SCORING_QUICK_START.md](../SCORING_QUICK_START.md) - Quick start with examples
 
-### 音符
-- 0 = 休止符
-- 1 = 左鼓
-- 2 = 右鼓
-- 3 = 大左鼓
-- 4 = 大右鼓
-- 5 = 滚筒开始
-- 6 = 大滚筒开始
-- 7 = 气球开始
-- 8 = 滚筒/气球结束
+## TJA Format Support
 
-## 与OpenTaikoChart插件的区别
+| Header | Support | Notes |
+|--------|---------|-------|
+| TITLE | ✅ | Song title |
+| ARTIST | ✅ | Artist name |
+| CREATOR | ✅ | Chart creator |
+| BPM | ✅ | Beats per minute |
+| WAVE | ✅ | Audio file path |
+| OFFSET | ✅ | Offset in seconds |
+| SCOREMODE | ✅ | Scoring calculation mode |
+| SCOREINIT | ✅ | Base points |
+| SCOREDIFF | ✅ | Difficulty multiplier |
+| BALLOON | ✅ | Balloon hit counts |
 
-| 功能 | TJA Reader | OpenTaikoChart |
-|------|-----------|-----------------|
-| 输入格式 | `.tja` | `.tci` / `.tcc` |
-| 转换需求 | 无 | 需要 |
-| 解析复杂度 | 直接 | 通过JSON |
-| 灵活性 | 高 | 标准化 |
+## Scoring Modes
 
-## 技术细节
+### Mode 0: AC 1-7 Generation
+- Combo < 200: 1000 points
+- Combo ≥ 200: 2000 points
 
-### 解析流程
-1. 读取TJA文本文件（UTF-8）
-2. 逐行解析，分离元数据和图表数据
-3. 在 `#START` 处将元数据模式切换为图表模式
-4. 收集课程数据（措施和命令）
-5. 根据元数据和课程数据生成可播放对象
+### Mode 1: AC 8-14 Generation (Default)
+```
+points = INIT + DIFF × ⌊(min(combo, 100) - 1) / 10⌋
+```
 
-### 时间计算
-- 基于BPM和时间签名计算措施持续时间
-- 每个音符在措施中均匀分布
-- 支持mid-measure BPM和measure changes
+### Mode 2: AC 0 Generation
+```
+points = INIT + DIFF × multiplier
+(multiplier: 100→8, 50→4, 30→2, 10→1, 0→0)
+```
 
-## 局限性
+## System Requirements
 
-- 不支持多人/couple模式
-- 不支持branch（分支）功能
-- 简单的气球处理（固定目标数）
+- **.NET Framework 4.7.2+** or **.NET 6.0+**
+- **Koioto** (with IChartReadable plugin support)
 
-## 许可证
+## License
 
-与Koioto相同
+MIT License - See LICENSE file for details
+
+## Author
+
+**ZhongTaiko**
+
+---
+
+For more information, see the documentation in other languages:
+- [繁體中文](README.zh-TW.md)
+- [日本語](README.ja.md)
+
