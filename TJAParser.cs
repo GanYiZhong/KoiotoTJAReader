@@ -411,7 +411,9 @@ namespace ZhongTaiko.TJAReader
                                         {
                                             if (courseData.Balloon.Length > balloonIndex)
                                             {
-                                                noteChip.RollObjective = courseData.Balloon[balloonIndex] ?? 5;
+                                                var balloonHits = courseData.Balloon[balloonIndex] ?? 5;
+                                                // Ensure RollObjective is at least 1 to prevent DivideByZeroException in Koioto
+                                                noteChip.RollObjective = balloonHits > 0 ? balloonHits : 1;
                                                 balloonIndex++;
                                             }
                                             else
