@@ -357,7 +357,11 @@ namespace ZhongTaiko.TJAReader
                     if (notesCount == 0)
                         notesCount = 1;
 
-                    var timePerNotes = (long)(GetMeasureDuration(nowMeasure, nowBPM) / notesCount);
+                    var measureDuration = GetMeasureDuration(nowMeasure, nowBPM);
+                    // Prevent division by zero: ensure measure duration is at least 1 microsecond
+                    if (measureDuration <= 0)
+                        measureDuration = 1;
+                    var timePerNotes = (long)(measureDuration / notesCount);
 
                     foreach (var line in measure)
                     {
