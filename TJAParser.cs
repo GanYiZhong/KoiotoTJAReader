@@ -354,19 +354,31 @@ namespace ZhongTaiko.TJAReader
                         }
                     }
 
+                    // Capture original values before normalization
+                    var originalNotesCount = notesCount;
+                    var originalMeasureDuration = GetMeasureDuration(nowMeasure, nowBPM);
+                    var originalBPM = nowBPM;
+                    var originalMeasureRate = nowMeasure.GetRate();
+
+                    // Log PRE-CLAMP values if suspicious
+                    if (originalNotesCount <= 0 || originalBPM <= 0 || originalMeasureRate <= 0)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[TJAReader] PRE-CLAMP WARN Measure {measureCount}: notesCount={originalNotesCount}, bpm={originalBPM}, measureRate={originalMeasureRate}, scroll={nowScroll}");
+                    }
+
                     if (notesCount == 0)
                         notesCount = 1;
 
-                    var measureDuration = GetMeasureDuration(nowMeasure, nowBPM);
+                    var measureDuration = originalMeasureDuration;
                     // Prevent division by zero: ensure measure duration is at least 1 microsecond
                     if (measureDuration <= 0)
                         measureDuration = 1;
                     var timePerNotes = (long)(measureDuration / notesCount);
 
-                    // Debug: log potentially problematic values
-                    if (timePerNotes <= 0 || measureDuration <= 0 || notesCount <= 0)
+                    // Log POST-TRUNCATE for zero timing
+                    if (timePerNotes == 0)
                     {
-                        System.Diagnostics.Debug.WriteLine($"[TJAReader] WARN: Measure {measureCount}: duration={measureDuration}, notesCount={notesCount}, timePerNotes={timePerNotes}, bpm={nowBPM}, measure={nowMeasure.GetRate()}");
+                        System.Diagnostics.Debug.WriteLine($"[TJAReader] POST-TRUNCATE WARN Measure {measureCount}: timePerNotes=0 (collapsed). duration={measureDuration}, notesCount={notesCount}, original_duration={originalMeasureDuration}");
                     }
 
                     foreach (var line in measure)
@@ -460,8 +472,16 @@ namespace ZhongTaiko.TJAReader
                             {
                                 if (double.TryParse(param, NumberStyles.Float, CultureInfo.InvariantCulture, out var scroll))
                                 {
-                                    eventChip.ChipType = Chips.ScrollChange;
-                                    nowScroll = scroll;
+                                    // Validate scroll > 0 to prevent downstream division/math errors
+                                    if (scroll > 0)
+                                    {
+                                        eventChip.ChipType = Chips.ScrollChange;
+                                        nowScroll = scroll;
+                                    }
+                                    else
+                                    {
+                                        System.Diagnostics.Debug.WriteLine($"[TJAReader] WARN: Invalid #SCROLL {scroll} at measure {measureCount} (must be > 0), keeping {nowScroll}");
+                                    }
                                 }
                             }
                             else if (command.StartsWith("#gogobegin"))
