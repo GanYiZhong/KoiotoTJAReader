@@ -41,8 +41,7 @@ namespace ZhongTaiko.TJAReader
                 }
 
                 // Resolve folder metadata (genre.ini, box.def, folder.json)
-                var folderPath = Path.GetDirectoryName(filePath);
-                var folderMeta = FolderMetadataResolver.Resolve(folderPath);
+                var folderMeta = FolderMetadataResolver.Resolve(filePath);
 
                 var result = new SongSelectMetadata
                 {
@@ -54,8 +53,13 @@ namespace ZhongTaiko.TJAReader
                     Creator = metadata.Creator?.Length > 0 ? metadata.Creator : new string[] { "" },
                     PreviewSong = metadata.Audio != null ? GetPath(filePath, metadata.Audio) : null,
                     SongPreviewTime = metadata.SongPreview,
-                    AlbumartPath = metadata.Albumart != null ? GetPath(filePath, metadata.Albumart) : null
+                    AlbumartPath = (folderMeta.Albumart != null && folderMeta.Albumart.Length > 0)
+                        ? GetPath(Path.GetDirectoryName(filePath), folderMeta.Albumart)
+                        : (metadata.Albumart != null ? GetPath(filePath, metadata.Albumart) : null)
                 };
+
+                // NOTE: folderMeta.Name, folderMeta.Description, folderMeta.GenreName are available
+                // for display in UI if Koioto's SongSelectMetadata is extended in the future
 
                 foreach (var course in courses)
                 {

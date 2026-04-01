@@ -22,58 +22,77 @@ namespace ZhongTaiko.TJAReader
     /// </summary>
     public static class FolderMetadataResolver
     {
-        public static FolderMetadata Resolve(string folderPath)
+        public static FolderMetadata Resolve(string tjaFilePath)
         {
             var metadata = new FolderMetadata();
 
             try
             {
-                // Step 1: Load folder.json (name, description, albumart)
-                var folderJsonPath = Path.Combine(folderPath, "folder.json");
-                if (File.Exists(folderJsonPath))
+                // Walk UP to find parent folder containing genre.ini/box.def
+                // TJA files may be in subfolders, but metadata files are in parent
+                var currentFolder = Path.GetDirectoryName(tjaFilePath);
+                var parentFolder = Path.GetDirectoryName(currentFolder);
+
+                System.Diagnostics.Debug.WriteLine($"[TJAReader] Resolving metadata: TJA={Path.GetFileName(tjaFilePath)}, CurrentFolder={Path.GetFileName(currentFolder)}, ParentFolder={Path.GetFileName(parentFolder)}");
+
+                // Try current folder first, then parent folder
+                var searchFolders = new[] { currentFolder, parentFolder };
+
+                foreach (var folderPath in searchFolders)
                 {
-                    var json = ParseJsonSimple(File.ReadAllText(folderJsonPath, Encoding.UTF8));
-                    metadata.Name = json.ContainsKey("name") ? json["name"] : Path.GetFileName(folderPath);
-                    metadata.Description = json.ContainsKey("description") ? json["description"] : "";
-                    metadata.Albumart = json.ContainsKey("albumart") ? json["albumart"] : "";
-                }
-                else
-                {
-                    metadata.Name = Path.GetFileName(folderPath);
-                    metadata.Description = "";
-                    metadata.Albumart = "";
+                    if (string.IsNullOrEmpty(folderPath) || !Directory.Exists(folderPath))
+                        continue;
+
+                    // Step 1: Load folder.json (name, description, albumart)
+                    var folderJsonPath = Path.Combine(folderPath, "folder.json");
+                    if (File.Exists(folderJsonPath) && string.IsNullOrEmpty(metadata.Name))
+                    {
+                        var json = ParseJsonSimple(File.ReadAllText(folderJsonPath, Encoding.UTF8));
+                        metadata.Name = json.ContainsKey("name") ? json["name"] : Path.GetFileName(folderPath);
+                        metadata.Description = json.ContainsKey("description") ? json["description"] : "";
+                        metadata.Albumart = json.ContainsKey("albumart") ? json["albumart"] : "";
+                        System.Diagnostics.Debug.WriteLine($"[TJAReader] Loaded folder.json from {Path.GetFileName(folderPath)}: name={metadata.Name}");
+                    }
+
+                    // Step 2: Load box.def (colon-separated #GENRE)
+                    var boxDefPath = Path.Combine(folderPath, "box.def");
+                    if (File.Exists(boxDefPath) && string.IsNullOrEmpty(metadata.GenreName))
+                    {
+                        var genreName = ParseBoxDef(boxDefPath);
+                        if (!string.IsNullOrEmpty(genreName))
+                        {
+                            metadata.GenreName = genreName;
+                            System.Diagnostics.Debug.WriteLine($"[TJAReader] Loaded GenreName from box.def: {genreName}");
+                            // Don't return yet - genre.ini may override
+                        }
+                    }
+
+                    // Step 3: Load genre.ini (GenreName only, highest priority)
+                    var genreIniPath = Path.Combine(folderPath, "genre.ini");
+                    if (File.Exists(genreIniPath) && string.IsNullOrEmpty(metadata.GenreName))
+                    {
+                        var genreName = ParseGenreIni(genreIniPath);
+                        if (!string.IsNullOrEmpty(genreName))
+                        {
+                            metadata.GenreName = genreName;
+                            System.Diagnostics.Debug.WriteLine($"[TJAReader] Loaded GenreName from genre.ini: {genreName}");
+                        }
+                    }
+
+                    // If we found metadata, stop searching parent folders
+                    if (!string.IsNullOrEmpty(metadata.Name) || !string.IsNullOrEmpty(metadata.GenreName))
+                        break;
                 }
 
-                // Step 2: Load box.def (Title -> GenreName mapping)
-                var boxDefPath = Path.Combine(folderPath, "box.def");
-                if (File.Exists(boxDefPath))
-                {
-                    var genres = ParseBoxDef(boxDefPath);
-                    if (genres.ContainsKey(metadata.Name))
-                    {
-                        metadata.GenreName = genres[metadata.Name];
-                        System.Diagnostics.Debug.WriteLine($"[TJAReader] Folder metadata: Name={metadata.Name}, GenreName={metadata.GenreName} (from box.def)");
-                        return metadata;
-                    }
-                }
-
-                // Step 3: Load genre.ini (GenreName only)
-                var genreIniPath = Path.Combine(folderPath, "genre.ini");
-                if (File.Exists(genreIniPath))
-                {
-                    var genreName = ParseGenreIni(genreIniPath);
-                    if (!string.IsNullOrEmpty(genreName))
-                    {
-                        metadata.GenreName = genreName;
-                        System.Diagnostics.Debug.WriteLine($"[TJAReader] Folder metadata: Name={metadata.Name}, GenreName={metadata.GenreName} (from genre.ini)");
-                    }
-                }
+                // Fallback to directory name if no metadata found
+                if (string.IsNullOrEmpty(metadata.Name))
+                    metadata.Name = Path.GetFileName(currentFolder);
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"[TJAReader] Error resolving folder metadata: {ex.Message}");
                 if (string.IsNullOrEmpty(metadata.Name))
-                    metadata.Name = Path.GetFileName(folderPath);
+                    metadata.Name = Path.GetFileName(Path.GetDirectoryName(tjaFilePath));
             }
 
             return metadata;
@@ -130,13 +149,11 @@ namespace ZhongTaiko.TJAReader
 
         /// <summary>
         /// Parse box.def file and extract #GENRE entries
-        /// Format: #GENRE	Title	GenreName
-        /// Returns: Dictionary[Title] -> GenreName
+        /// Format: #GENRE:GenreName (colon-separated)
+        /// Returns: GenreName string
         /// </summary>
-        private static Dictionary<string, string> ParseBoxDef(string boxDefPath)
+        private static string ParseBoxDef(string boxDefPath)
         {
-            var result = new Dictionary<string, string>();
-
             try
             {
                 string content = null;
@@ -162,17 +179,17 @@ namespace ZhongTaiko.TJAReader
                     if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith(";"))
                         continue;
 
-                    // Parse #GENRE entries: #GENRE\tTitle\tGenreName
+                    // Parse #GENRE entries: #GENRE:GenreName
                     if (trimmed.StartsWith("#GENRE", StringComparison.OrdinalIgnoreCase))
                     {
-                        var parts = trimmed.Split('\t');
-                        if (parts.Length >= 3)
+                        // Format: #GENRE:GenreName
+                        var colonIdx = trimmed.IndexOf(':');
+                        if (colonIdx > 0)
                         {
-                            var title = parts[1].Trim();
-                            var genreName = parts[2].Trim();
-                            if (!string.IsNullOrEmpty(title) && !string.IsNullOrEmpty(genreName))
+                            var genreName = trimmed.Substring(colonIdx + 1).Trim();
+                            if (!string.IsNullOrEmpty(genreName))
                             {
-                                result[title] = genreName;
+                                return genreName;
                             }
                         }
                     }
@@ -183,7 +200,7 @@ namespace ZhongTaiko.TJAReader
                 System.Diagnostics.Debug.WriteLine($"[TJAReader] Error parsing box.def: {ex.Message}");
             }
 
-            return result;
+            return null;
         }
 
         /// <summary>
