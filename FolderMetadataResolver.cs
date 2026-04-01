@@ -27,6 +27,110 @@ namespace ZhongTaiko.TJAReader
             "Logs",
             "TJAReader_debug.txt");
 
+        static FolderMetadataResolver()
+        {
+            try
+            {
+                var generated = RunInitialScan();
+                if (generated > 0)
+                {
+                    Trace($"RunInitialScan: generated {generated} folder.json files, restarting Koioto...");
+                    RestartKoioto();
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private static void RestartKoioto()
+        {
+            try
+            {
+                var exe = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName;
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exe) { UseShellExecute = true });
+                System.Environment.Exit(0);
+            }
+            catch (Exception ex)
+            {
+                Trace($"RestartKoioto failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Pre-generates folder.json for all directories containing genre.ini or box.def,
+        /// so Koioto can read them on the FIRST launch instead of requiring a second restart.
+        /// Called once at class initialization (before Koioto's folder.json scan pass).
+        /// Returns the number of newly generated folder.json files.
+        /// </summary>
+        private static int RunInitialScan()
+        {
+            var baseDir = AppDomain.CurrentDomain.BaseDirectory ?? ".";
+            Trace($"RunInitialScan: baseDir={baseDir}");
+
+            // Check common songs directory names relative to app base
+            foreach (var candidate in new[] { "Songs", "songs", "Song", "song", "Music", "Charts", "楽曲" })
+            {
+                var songsPath = Path.Combine(baseDir, candidate);
+                if (Directory.Exists(songsPath))
+                {
+                    Trace($"RunInitialScan: found songs dir={songsPath}");
+                    return PreGenerateFolderJsonFiles(songsPath);
+                }
+            }
+
+            Trace("RunInitialScan: no songs directory found, skipping pre-generation");
+            return 0;
+        }
+
+        private static int PreGenerateFolderJsonFiles(string rootPath)
+        {
+            var count = 0;
+            try
+            {
+                var dirs = Directory.EnumerateDirectories(rootPath, "*", SearchOption.AllDirectories);
+                foreach (var dir in dirs)
+                {
+                    var folderJsonPath = Path.Combine(dir, "folder.json");
+                    if (File.Exists(folderJsonPath))
+                        continue;
+
+                    var genreIniPath = Path.Combine(dir, "genre.ini");
+                    var boxDefPath = Path.Combine(dir, "box.def");
+
+                    string genreName = null;
+                    if (File.Exists(genreIniPath))
+                        genreName = ParseGenreIni(genreIniPath);
+                    if (string.IsNullOrEmpty(genreName) && File.Exists(boxDefPath))
+                        genreName = ParseBoxDef(boxDefPath);
+
+                    if (!string.IsNullOrEmpty(genreName))
+                    {
+                        try
+                        {
+                            var jsonContent = "{\n" +
+                                $"    \"name\": \"{EscapeJson(genreName)}\",\n" +
+                                $"    \"description\": \"\",\n" +
+                                $"    \"albumart\": \"\"\n" +
+                                "}";
+                            File.WriteAllText(folderJsonPath, jsonContent, Encoding.UTF8);
+                            Trace($"PreGenerate: created {folderJsonPath} name={genreName}");
+                            count++;
+                        }
+                        catch (Exception ex)
+                        {
+                            Trace($"PreGenerate: failed to write {folderJsonPath}: {ex.Message}");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Trace($"PreGenerateFolderJsonFiles error: {ex.Message}");
+            }
+            return count;
+        }
+
         public static FolderMetadata Resolve(string tjaFilePath)
         {
             var metadata = new FolderMetadata();
