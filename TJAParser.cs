@@ -127,11 +127,11 @@ namespace ZhongTaiko.TJAReader
                                     _metadata.ScoreMode = scoreMode;
                                 break;
                             case "SCOREINIT":
-                                if (int.TryParse(value, out var scoreInit) && currentCourseData != null)
+                                if (!string.IsNullOrWhiteSpace(value) && int.TryParse(value, out var scoreInit) && currentCourseData != null)
                                     currentCourseData.Scoreinit = scoreInit;
                                 break;
                             case "SCOREDIFF":
-                                if (int.TryParse(value, out var scoreDiff) && currentCourseData != null)
+                                if (!string.IsNullOrWhiteSpace(value) && int.TryParse(value, out var scoreDiff) && currentCourseData != null)
                                     currentCourseData.Scorediff = scoreDiff;
                                 break;
                             case "COURSE":
@@ -362,6 +362,12 @@ namespace ZhongTaiko.TJAReader
                     if (measureDuration <= 0)
                         measureDuration = 1;
                     var timePerNotes = (long)(measureDuration / notesCount);
+
+                    // Debug: log potentially problematic values
+                    if (timePerNotes <= 0 || measureDuration <= 0 || notesCount <= 0)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[TJAReader] WARN: Measure {measureCount}: duration={measureDuration}, notesCount={notesCount}, timePerNotes={timePerNotes}, bpm={nowBPM}, measure={nowMeasure.GetRate()}");
+                    }
 
                     foreach (var line in measure)
                     {
