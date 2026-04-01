@@ -22,6 +22,11 @@ namespace ZhongTaiko.TJAReader
     /// </summary>
     public static class FolderMetadataResolver
     {
+        private static readonly string DebugLogPath = Path.Combine(
+            AppDomain.CurrentDomain.BaseDirectory ?? ".",
+            "Logs",
+            "TJAReader_debug.txt");
+
         public static FolderMetadata Resolve(string tjaFilePath)
         {
             var metadata = new FolderMetadata();
@@ -33,7 +38,8 @@ namespace ZhongTaiko.TJAReader
                 var currentFolder = Path.GetDirectoryName(tjaFilePath);
                 var parentFolder = Path.GetDirectoryName(currentFolder);
 
-                System.Diagnostics.Debug.WriteLine($"[TJAReader] Resolving metadata: TJA={Path.GetFileName(tjaFilePath)}, CurrentFolder={Path.GetFileName(currentFolder)}, ParentFolder={Path.GetFileName(parentFolder)}");
+                Trace($"Resolve start: TJA={tjaFilePath}");
+                Trace($"Resolve folders: current={currentFolder ?? "<null>"}, parent={parentFolder ?? "<null>"}");
 
                 // Try current folder first, then parent folder
                 var searchFolders = new[] { currentFolder, parentFolder };
@@ -41,56 +47,98 @@ namespace ZhongTaiko.TJAReader
                 foreach (var folderPath in searchFolders)
                 {
                     if (string.IsNullOrEmpty(folderPath) || !Directory.Exists(folderPath))
+                    {
+                        Trace($"Skipping folder: path={folderPath ?? "<null>"} exists={Directory.Exists(folderPath ?? string.Empty)}");
                         continue;
+                    }
+
+                    Trace($"Inspecting folder: {folderPath}");
 
                     // Step 1: Load folder.json (name, description, albumart)
                     var folderJsonPath = Path.Combine(folderPath, "folder.json");
+                    var folderJsonExists = File.Exists(folderJsonPath);
+                    Trace($"  folder.json exists={folderJsonExists} path={folderJsonPath}");
                     if (File.Exists(folderJsonPath) && string.IsNullOrEmpty(metadata.Name))
                     {
                         var json = ParseJsonSimple(File.ReadAllText(folderJsonPath, Encoding.UTF8));
                         metadata.Name = json.ContainsKey("name") ? json["name"] : Path.GetFileName(folderPath);
                         metadata.Description = json.ContainsKey("description") ? json["description"] : "";
                         metadata.Albumart = json.ContainsKey("albumart") ? json["albumart"] : "";
-                        System.Diagnostics.Debug.WriteLine($"[TJAReader] Loaded folder.json from {Path.GetFileName(folderPath)}: name={metadata.Name}");
+                        Trace($"  Loaded folder.json: name={metadata.Name ?? "<null>"}, description={metadata.Description ?? "<null>"}, albumart={metadata.Albumart ?? "<null>"}");
                     }
 
                     // Step 2: Load box.def (colon-separated #GENRE)
                     var boxDefPath = Path.Combine(folderPath, "box.def");
-                    if (File.Exists(boxDefPath) && string.IsNullOrEmpty(metadata.GenreName))
+                    var boxDefExists = File.Exists(boxDefPath);
+                    Trace($"  box.def exists={boxDefExists} path={boxDefPath}");
+                    if (boxDefExists && string.IsNullOrEmpty(metadata.GenreName))
                     {
                         var genreName = ParseBoxDef(boxDefPath);
                         if (!string.IsNullOrEmpty(genreName))
                         {
                             metadata.GenreName = genreName;
-                            System.Diagnostics.Debug.WriteLine($"[TJAReader] Loaded GenreName from box.def: {genreName}");
-                            // Don't return yet - genre.ini may override
+                            Trace($"  Loaded GenreName from box.def: {genreName}");
                         }
                     }
 
                     // Step 3: Load genre.ini (GenreName only, highest priority)
                     var genreIniPath = Path.Combine(folderPath, "genre.ini");
-                    if (File.Exists(genreIniPath) && string.IsNullOrEmpty(metadata.GenreName))
+                    var genreIniExists = File.Exists(genreIniPath);
+                    Trace($"  genre.ini exists={genreIniExists} path={genreIniPath}");
+                    if (genreIniExists)
                     {
                         var genreName = ParseGenreIni(genreIniPath);
                         if (!string.IsNullOrEmpty(genreName))
                         {
                             metadata.GenreName = genreName;
-                            System.Diagnostics.Debug.WriteLine($"[TJAReader] Loaded GenreName from genre.ini: {genreName}");
+                            Trace($"  Loaded GenreName from genre.ini: {genreName}");
                         }
                     }
-
-                    // If we found metadata, stop searching parent folders
-                    if (!string.IsNullOrEmpty(metadata.Name) || !string.IsNullOrEmpty(metadata.GenreName))
-                        break;
                 }
 
                 // Fallback to directory name if no metadata found
                 if (string.IsNullOrEmpty(metadata.Name))
                     metadata.Name = Path.GetFileName(currentFolder);
+
+                // AUTO-GENERATE folder.json if genre.ini/box.def found but no folder.json
+                // Koioto reads folder.json natively for UI display - plugin API has no GenreName field
+                if (!string.IsNullOrEmpty(metadata.GenreName))
+                {
+                    foreach (var folderPath in searchFolders)
+                    {
+                        if (string.IsNullOrEmpty(folderPath) || !Directory.Exists(folderPath))
+                            continue;
+
+                        var folderJsonPath = Path.Combine(folderPath, "folder.json");
+                        var hasGenreSource = File.Exists(Path.Combine(folderPath, "genre.ini"))
+                                          || File.Exists(Path.Combine(folderPath, "box.def"));
+
+                        if (hasGenreSource && !File.Exists(folderJsonPath))
+                        {
+                            try
+                            {
+                                var jsonContent = "{\n" +
+                                    $"    \"name\": \"{EscapeJson(metadata.GenreName)}\",\n" +
+                                    $"    \"description\": \"\",\n" +
+                                    $"    \"albumart\": \"\"\n" +
+                                    "}";
+                                File.WriteAllText(folderJsonPath, jsonContent, Encoding.UTF8);
+                                Trace($"AUTO-GENERATED folder.json at {folderJsonPath} with name={metadata.GenreName}");
+                            }
+                            catch (Exception ex)
+                            {
+                                Trace($"Failed to auto-generate folder.json: {ex.Message}");
+                            }
+                        }
+                    }
+                }
+
+                Trace(
+                    $"Resolve complete: Name={metadata.Name ?? "<null>"}, Description={metadata.Description ?? "<null>"}, Albumart={metadata.Albumart ?? "<null>"}, GenreName={metadata.GenreName ?? "<null>"}");
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[TJAReader] Error resolving folder metadata: {ex.Message}");
+                Trace($"Error resolving folder metadata: {ex}");
                 if (string.IsNullOrEmpty(metadata.Name))
                     metadata.Name = Path.GetFileName(Path.GetDirectoryName(tjaFilePath));
             }
@@ -107,41 +155,39 @@ namespace ZhongTaiko.TJAReader
         {
             try
             {
-                string content = null;
-
-                // Try UTF-8 first
-                try
-                {
-                    content = File.ReadAllText(genreIniPath, Encoding.UTF8);
-                }
-                catch
-                {
-                    // Fallback to Shift-JIS (CP932)
-                    var encoding = Encoding.GetEncoding("shift_jis");
-                    content = File.ReadAllText(genreIniPath, encoding);
-                }
+                var content = ReadTextWithDetection(genreIniPath, out var encodingUsed, out var byteCount);
+                Trace($"ParseGenreIni: path={genreIniPath}, bytes={byteCount}, encoding={encodingUsed}");
 
                 var lines = content.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
-                foreach (var line in lines)
+                for (var i = 0; i < lines.Length; i++)
                 {
+                    var line = lines[i];
+                    Trace($"  genre.ini line[{i}]={line}");
+
                     if (string.IsNullOrWhiteSpace(line) || line.StartsWith(";"))
                         continue;
 
                     if (line.StartsWith("GenreName", StringComparison.OrdinalIgnoreCase))
                     {
                         var parts = line.Split('=');
+                        Trace($"  genre.ini GenreName candidate: parts={parts.Length}");
                         if (parts.Length >= 2)
                         {
                             var value = parts[1].Trim();
                             if (!string.IsNullOrEmpty(value))
+                            {
+                                Trace($"  genre.ini parsed GenreName={value}");
                                 return value;
+                            }
                         }
                     }
                 }
+
+                Trace("  genre.ini parse result: no GenreName found");
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[TJAReader] Error parsing genre.ini: {ex.Message}");
+                Trace($"Error parsing genre.ini: {ex}");
             }
 
             return null;
@@ -156,24 +202,15 @@ namespace ZhongTaiko.TJAReader
         {
             try
             {
-                string content = null;
-
-                // Try UTF-8 first
-                try
-                {
-                    content = File.ReadAllText(boxDefPath, Encoding.UTF8);
-                }
-                catch
-                {
-                    // Fallback to Shift-JIS (CP932)
-                    var encoding = Encoding.GetEncoding("shift_jis");
-                    content = File.ReadAllText(boxDefPath, encoding);
-                }
+                var content = ReadTextWithDetection(boxDefPath, out var encodingUsed, out var byteCount);
+                Trace($"ParseBoxDef: path={boxDefPath}, bytes={byteCount}, encoding={encodingUsed}");
 
                 var lines = content.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
-                foreach (var line in lines)
+                for (var i = 0; i < lines.Length; i++)
                 {
+                    var line = lines[i];
                     var trimmed = line.Trim();
+                    Trace($"  box.def line[{i}]={trimmed}");
 
                     // Skip comments and empty lines
                     if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith(";"))
@@ -189,15 +226,18 @@ namespace ZhongTaiko.TJAReader
                             var genreName = trimmed.Substring(colonIdx + 1).Trim();
                             if (!string.IsNullOrEmpty(genreName))
                             {
+                                Trace($"  box.def parsed GenreName={genreName}");
                                 return genreName;
                             }
                         }
                     }
                 }
+
+                Trace("  box.def parse result: no #GENRE found");
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[TJAReader] Error parsing box.def: {ex.Message}");
+                Trace($"Error parsing box.def: {ex}");
             }
 
             return null;
@@ -233,10 +273,109 @@ namespace ZhongTaiko.TJAReader
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[TJAReader] Error parsing folder.json: {ex.Message}");
+                Trace($"Error parsing folder.json: {ex}");
             }
 
             return result;
+        }
+
+        private static string EscapeJson(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            return s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "\\r");
+        }
+
+        private static string ReadTextWithDetection(string path, out string encodingUsed, out int byteCount)
+        {
+            var bytes = File.ReadAllBytes(path);
+            byteCount = bytes.Length;
+            string text;
+
+            if (HasUtf8Bom(bytes))
+            {
+                encodingUsed = "utf-8-bom";
+                text = new UTF8Encoding(true).GetString(bytes);
+                return text.TrimStart('\uFEFF');
+            }
+
+            if (LooksLikeUtf8(bytes))
+            {
+                encodingUsed = "utf-8";
+                text = Encoding.UTF8.GetString(bytes);
+                return text.TrimStart('\uFEFF');
+            }
+
+            encodingUsed = "shift_jis";
+            text = Encoding.GetEncoding("shift_jis").GetString(bytes);
+            return text.TrimStart('\uFEFF');
+        }
+
+        private static bool HasUtf8Bom(byte[] bytes)
+        {
+            return bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF;
+        }
+
+        private static bool LooksLikeUtf8(byte[] bytes)
+        {
+            var i = 0;
+            while (i < bytes.Length)
+            {
+                var b = bytes[i];
+
+                if (b <= 0x7F)
+                {
+                    i++;
+                    continue;
+                }
+
+                int expectedContinuationBytes;
+                if ((b & 0xE0) == 0xC0)
+                    expectedContinuationBytes = 1;
+                else if ((b & 0xF0) == 0xE0)
+                    expectedContinuationBytes = 2;
+                else if ((b & 0xF8) == 0xF0)
+                    expectedContinuationBytes = 3;
+                else
+                    return false;
+
+                if (i + expectedContinuationBytes >= bytes.Length)
+                    return false;
+
+                for (var j = 1; j <= expectedContinuationBytes; j++)
+                {
+                    if ((bytes[i + j] & 0xC0) != 0x80)
+                        return false;
+                }
+
+                i += expectedContinuationBytes + 1;
+            }
+
+            return true;
+        }
+
+        internal static void Trace(string message)
+        {
+            var line = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [TJAReader] {message}";
+
+            try
+            {
+                System.Diagnostics.Debug.WriteLine(line);
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                var logDir = Path.GetDirectoryName(DebugLogPath);
+                if (!string.IsNullOrEmpty(logDir))
+                    Directory.CreateDirectory(logDir);
+
+                File.AppendAllLines(DebugLogPath, new[] { line });
+            }
+            catch
+            {
+            }
         }
     }
 }

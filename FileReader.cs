@@ -29,6 +29,7 @@ namespace ZhongTaiko.TJAReader
         {
             try
             {
+                FolderMetadataResolver.Trace($"GetSelectable start: filePath={filePath}");
                 var tjaText = File.ReadAllText(filePath, Encoding.UTF8);
                 var parser = new TJAParser(tjaText);
 
@@ -42,6 +43,8 @@ namespace ZhongTaiko.TJAReader
 
                 // Resolve folder metadata (genre.ini, box.def, folder.json)
                 var folderMeta = FolderMetadataResolver.Resolve(filePath);
+                FolderMetadataResolver.Trace(
+                    $"GetSelectable folderMeta after Resolve: Name={folderMeta?.Name ?? "<null>"}, Description={folderMeta?.Description ?? "<null>"}, Albumart={folderMeta?.Albumart ?? "<null>"}, GenreName={folderMeta?.GenreName ?? "<null>"}");
 
                 var result = new SongSelectMetadata
                 {
@@ -68,10 +71,14 @@ namespace ZhongTaiko.TJAReader
                     result[GetCoursesFromString(course.Difficulty)] = diff;
                 }
 
+                FolderMetadataResolver.Trace(
+                    $"GetSelectable complete: Title={result.Title ?? "<null>"}, AlbumartPath={result.AlbumartPath ?? "<null>"}, GenreName(unmapped)={folderMeta?.GenreName ?? "<null>"}");
+
                 return result;
             }
-            catch
+            catch (System.Exception ex)
             {
+                FolderMetadataResolver.Trace($"GetSelectable error: {ex}");
                 return null;
             }
         }
