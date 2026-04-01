@@ -242,6 +242,8 @@ namespace ZhongTaiko.TJAReader
         public double? Offset { get; set; } = 0;
         public double? SongPreview { get; set; } = 0;
         public string Albumart { get; set; }
+        public string Background { get; set; }
+        public double? MovieOffset { get; set; }
         public int? ScoreMode { get; set; } = 1; // Default to AC 8-14 generation (1)
     }
 

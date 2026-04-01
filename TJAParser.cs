@@ -112,6 +112,16 @@ namespace ZhongTaiko.TJAReader
                             case "ALBUMART":
                                 _metadata.Albumart = value;
                                 break;
+                            case "BGIMAGE":
+                                _metadata.Albumart = value;
+                                break;
+                            case "BGMOVIE":
+                                _metadata.Background = value;
+                                break;
+                            case "MOVIEOFFSET":
+                                if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var movieOffset))
+                                    _metadata.MovieOffset = movieOffset;
+                                break;
                             case "SCOREMODE":
                                 if (int.TryParse(value, out var scoreMode))
                                     _metadata.ScoreMode = scoreMode;

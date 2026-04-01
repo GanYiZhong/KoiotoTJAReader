@@ -4,6 +4,12 @@ A direct TJA format reader plugin for Koioto rhythm game, eliminating the need f
 
 **Languages:** [English](#koiototjareader) | [繁體中文](README.zh-TW.md) | [日本語](README.ja.md)
 
+## ⚠️ Important Legal Notice
+
+**Per Koioto's Official Guidelines:** It is strictly prohibited to publicly display any videos or screenshots of **existing commercial game chart content** played on Koioto.
+
+This plugin is intended solely for reading self-created charts or charts obtained with proper authorization. Users must comply with Koioto's Terms of Service and must not use this plugin to publicly display any copyrighted content.
+
 ## Features
 
 ✅ **Direct .tja File Reading** - No conversion required  
