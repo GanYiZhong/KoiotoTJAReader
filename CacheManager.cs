@@ -81,9 +81,26 @@ namespace ZhongTaiko.TJAReader
             if (_cacheDoc?.Root == null)
                 _cacheDoc = new XDocument(new XElement("cache"));
 
-            var existingFile = _cacheDoc.Root.Elements("file").FirstOrDefault(e => (string)e.Attribute("path") == filePath);
+            var normalizedPath = NormalizePath(filePath);
+
+            var existingFile = _cacheDoc.Root.Elements("file").FirstOrDefault(e => NormalizePath((string)e.Attribute("path")) == normalizedPath);
+
+            // Check if content actually changed
+            bool contentChanged = true;
             if (existingFile != null)
+            {
+                var existingCourses = existingFile.Elements("course").Select(c => (string)c.Attribute("difficulty")).ToHashSet();
+                var newCourses = courses.Select(c => c.Difficulty).ToHashSet();
+                contentChanged = !existingCourses.SetEquals(newCourses);
+
+                if (!contentChanged)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[CacheManager] Cache content unchanged for {filePath}, skipping write");
+                    return;
+                }
+
                 existingFile.Remove();
+            }
 
             var fileElem = new XElement("file",
                 new XAttribute("path", filePath),
@@ -100,6 +117,7 @@ namespace ZhongTaiko.TJAReader
             }
 
             _cacheDoc.Root.Add(fileElem);
+            System.Diagnostics.Debug.WriteLine($"[CacheManager] Updated cache for {filePath}");
         }
 
         /// <summary>
