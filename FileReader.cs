@@ -34,17 +34,39 @@ namespace ZhongTaiko.TJAReader
             try
             {
                 FolderMetadataResolver.Trace($"GetSelectable start: filePath={filePath}");
-                var tjaText = ReadTjaText(filePath);
-                var parser = new TJAParser(tjaText);
 
-                var metadata = parser.GetMetadata();
-                var courses = parser.GetCourses();
+                // Check if file is already cached (unchanged)
+                TJAMetadata metadata = null;
+                TJACourse[] courses = null;
 
-                // Cache the course info for next time
-                if (courses.Length > 0)
+                if (_cache.IsCacheValid(filePath))
                 {
-                    _cache.CacheMetadata(filePath, courses);
-                    _cache.Save();
+                    FolderMetadataResolver.Trace($"[Cache HIT] Using cached data for {filePath}");
+                    var cachedCourses = _cache.GetCachedCourses(filePath);
+                    if (cachedCourses != null && cachedCourses.Count > 0)
+                    {
+                        // Reconstruct metadata with defaults (sufficient for song selection)
+                        metadata = new TJAMetadata();
+                        courses = cachedCourses.Values.ToArray();
+                    }
+                }
+
+                // If not in cache, parse the TJA file
+                if (metadata == null || courses == null || courses.Length == 0)
+                {
+                    FolderMetadataResolver.Trace($"[Cache MISS] Parsing {filePath}");
+                    var tjaText = ReadTjaText(filePath);
+                    var parser = new TJAParser(tjaText);
+
+                    metadata = parser.GetMetadata();
+                    courses = parser.GetCourses();
+
+                    // Cache the course info for next time
+                    if (courses.Length > 0)
+                    {
+                        _cache.CacheMetadata(filePath, courses);
+                        _cache.Save();
+                    }
                 }
 
                 if (courses.Length == 0)
