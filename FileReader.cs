@@ -9,9 +9,10 @@ namespace ZhongTaiko.TJAReader
     /// <summary>
     /// TJA format reader plugin for Koioto.
     /// Directly reads .tja files without conversion to TCC format.
-    /// Uses JSON cache to speed up repeated loads.
+    /// Uses XML cache to speed up repeated loads.
+    /// Implements KoiotoPlugin lifecycle hooks for async folder pre-loading.
     /// </summary>
-    public class FileReader : Koioto.Plugin.IChartReadable
+    public class FileReader : Koioto.Plugin.KoiotoPlugin, Koioto.Plugin.IChartReadable
     {
         private static CacheManager _cache = new CacheManager();
         private static int _cacheWriteCounter = 0;
@@ -292,6 +293,40 @@ namespace ZhongTaiko.TJAReader
             catch
             {
                 return null;
+            }
+        }
+
+        /// <summary>
+        /// KoiotoPlugin lifecycle hook: Called when in song select screen.
+        /// Triggers async folder pre-loading for faster subsequent loads.
+        /// </summary>
+        public override void OnSongSelect()
+        {
+            try
+            {
+                // Pre-load all major song folders on each song select entry
+                var songBaseDirs = new[]
+                {
+                    "D:\\koioto\\Songs",
+                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Songs"),
+                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Charts")
+                };
+
+                foreach (var songDir in songBaseDirs.Where(d => Directory.Exists(d)))
+                {
+                    // Pre-load each subfolder (JPOP, Anime, etc.)
+                    foreach (var subfolder in Directory.EnumerateDirectories(songDir))
+                    {
+                        var dummyPath = Path.Combine(subfolder, "dummy.tja");
+                        TryStartFolderPreload(dummyPath);
+                    }
+                    FolderMetadataResolver.Trace($"[OnSongSelect] Triggered pre-load for {songDir}");
+                    break;
+                }
+            }
+            catch (Exception ex)
+            {
+                FolderMetadataResolver.Trace($"[OnSongSelect] Error: {ex.Message}");
             }
         }
 
