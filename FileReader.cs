@@ -14,6 +14,8 @@ namespace ZhongTaiko.TJAReader
     public class FileReader : Koioto.Plugin.IChartReadable
     {
         private static CacheManager _cache = new CacheManager();
+        private static int _cacheWriteCounter = 0;
+        private const int CACHE_WRITE_INTERVAL = 20; // Save cache every 20 files
 
         public string Name => "TJA Reader";
 
@@ -36,26 +38,56 @@ namespace ZhongTaiko.TJAReader
                 var sw = System.Diagnostics.Stopwatch.StartNew();
                 FolderMetadataResolver.Trace($"GetSelectable start: filePath={filePath}");
 
-                // Always parse TJA for metadata (fast string parsing)
-                // Only cache/skip CourseParser, not TJAParser
-                var swRead = System.Diagnostics.Stopwatch.StartNew();
-                var tjaText = ReadTjaText(filePath);
-                swRead.Stop();
+                TJAMetadata metadata = null;
+                TJACourse[] courses = null;
 
-                var swParse = System.Diagnostics.Stopwatch.StartNew();
-                var parser = new TJAParser(tjaText);
-                var metadata = parser.GetMetadata();
-                var courses = parser.GetCourses();
-                swParse.Stop();
-
-                // Cache courses for later (skip expensive CourseParser)
-                if (courses.Length > 0)
+                // Check cache first - on hit, skip TJAParser entirely
+                if (_cache.IsCacheValid(filePath))
                 {
-                    _cache.CacheMetadata(filePath, courses);
-                    FolderMetadataResolver.Trace($"[Cache] Updated for {filePath}");
+                    var swCacheRead = System.Diagnostics.Stopwatch.StartNew();
+                    var cachedMeta = _cache.GetCachedMetadata(filePath);
+                    var cachedCourses = _cache.GetCachedCourses(filePath);
+                    swCacheRead.Stop();
+
+                    if (cachedMeta != null && cachedCourses != null && cachedCourses.Count > 0)
+                    {
+                        metadata = cachedMeta;
+                        courses = cachedCourses.Values.ToArray();
+                        FolderMetadataResolver.Trace($"[Cache] HIT - skipped parse: {filePath} (Read={swCacheRead.ElapsedMilliseconds}ms)");
+                    }
                 }
 
-                if (courses.Length == 0)
+                // Cache miss or incomplete - parse TJA file
+                if (metadata == null || courses == null)
+                {
+                    var swRead = System.Diagnostics.Stopwatch.StartNew();
+                    var tjaText = ReadTjaText(filePath);
+                    swRead.Stop();
+
+                    var swParse = System.Diagnostics.Stopwatch.StartNew();
+                    var parser = new TJAParser(tjaText);
+                    metadata = parser.GetMetadata();
+                    courses = parser.GetCourses();
+                    swParse.Stop();
+
+                    // Cache both metadata and courses for next load
+                    if (courses.Length > 0)
+                    {
+                        _cache.CacheMetadata(filePath, courses, metadata);
+                        FolderMetadataResolver.Trace($"[Cache] MISS - updated: {filePath} (Parse={swParse.ElapsedMilliseconds}ms)");
+
+                        // Periodically flush cache to disk (every N files)
+                        _cacheWriteCounter++;
+                        if (_cacheWriteCounter >= CACHE_WRITE_INTERVAL)
+                        {
+                            _cache.Save();
+                            FolderMetadataResolver.Trace($"[Cache] FLUSHED to disk ({_cacheWriteCounter} files)");
+                            _cacheWriteCounter = 0;
+                        }
+                    }
+                }
+
+                if (courses == null || courses.Length == 0)
                 {
                     FolderMetadataResolver.Trace($"GetSelectable: no courses found in {filePath}");
                     return null;
@@ -95,7 +127,7 @@ namespace ZhongTaiko.TJAReader
 
                 sw.Stop();
                 FolderMetadataResolver.Trace(
-                    $"GetSelectable complete: Title={result.Title ?? "<null>"}, AlbumartPath={result.AlbumartPath ?? "<null>"}, GenreName(unmapped)={folderMeta?.GenreName ?? "<null>"} [Read={swRead.ElapsedMilliseconds}ms, Parse={swParse.ElapsedMilliseconds}ms, Folder={swFolder.ElapsedMilliseconds}ms, Total={sw.ElapsedMilliseconds}ms]");
+                    $"GetSelectable complete: Title={result.Title ?? "<null>"}, AlbumartPath={result.AlbumartPath ?? "<null>"}, GenreName(unmapped)={folderMeta?.GenreName ?? "<null>"} [Folder={swFolder.ElapsedMilliseconds}ms, Total={sw.ElapsedMilliseconds}ms]");
 
                 return result;
             }

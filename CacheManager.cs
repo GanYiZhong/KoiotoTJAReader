@@ -74,9 +74,44 @@ namespace ZhongTaiko.TJAReader
         }
 
         /// <summary>
-        /// Stores metadata for a TJA file in cache.
+        /// Retrieves cached full metadata (title, artist, etc.) for a TJA file.
         /// </summary>
-        public void CacheMetadata(string filePath, TJACourse[] courses)
+        public TJAMetadata GetCachedMetadata(string filePath)
+        {
+            if (_cacheDoc == null)
+                return null;
+
+            var fileElem = _cacheDoc.Root?.Elements("file").FirstOrDefault(e => (string)e.Attribute("path") == filePath);
+            if (fileElem == null)
+                return null;
+
+            var metaElem = fileElem.Element("metadata");
+            if (metaElem == null)
+                return null;
+
+            var metadata = new TJAMetadata
+            {
+                Title = (string)metaElem.Attribute("title") ?? "",
+                Subtitle = (string)metaElem.Attribute("subtitle") ?? "",
+                Artist = ((string)metaElem.Attribute("artist") ?? "").Split(';'),
+                Creator = ((string)metaElem.Attribute("creator") ?? "").Split(';'),
+                Audio = (string)metaElem.Attribute("audio"),
+                BPM = double.TryParse((string)metaElem.Attribute("bpm"), out var bpm) ? bpm : 120,
+                Offset = double.TryParse((string)metaElem.Attribute("offset"), out var off) ? off : 0,
+                SongPreview = double.TryParse((string)metaElem.Attribute("preview"), out var prev) ? prev : 0,
+                Albumart = (string)metaElem.Attribute("albumart"),
+                Background = (string)metaElem.Attribute("background"),
+                MovieOffset = double.TryParse((string)metaElem.Attribute("movieoffset"), out var mov) ? mov : (double?)null,
+                ScoreMode = int.TryParse((string)metaElem.Attribute("scoremode"), out var sm) ? sm : 1
+            };
+
+            return metadata;
+        }
+
+        /// <summary>
+        /// Stores metadata for a TJA file in cache (courses and full metadata).
+        /// </summary>
+        public void CacheMetadata(string filePath, TJACourse[] courses, TJAMetadata fullMetadata = null)
         {
             if (_cacheDoc?.Root == null)
                 _cacheDoc = new XDocument(new XElement("cache"));
@@ -107,6 +142,25 @@ namespace ZhongTaiko.TJAReader
                 new XAttribute("hash", ComputeFileHash(filePath)),
                 new XAttribute("modified", File.GetLastWriteTimeUtc(filePath).Ticks)
             );
+
+            // Store full metadata for cache hits
+            if (fullMetadata != null)
+            {
+                fileElem.Add(new XElement("metadata",
+                    new XAttribute("title", fullMetadata.Title ?? ""),
+                    new XAttribute("subtitle", fullMetadata.Subtitle ?? ""),
+                    new XAttribute("artist", string.Join(";", fullMetadata.Artist ?? new string[] { })),
+                    new XAttribute("creator", string.Join(";", fullMetadata.Creator ?? new string[] { })),
+                    new XAttribute("audio", fullMetadata.Audio ?? ""),
+                    new XAttribute("bpm", fullMetadata.BPM ?? 120),
+                    new XAttribute("offset", fullMetadata.Offset ?? 0),
+                    new XAttribute("preview", fullMetadata.SongPreview ?? 0),
+                    new XAttribute("albumart", fullMetadata.Albumart ?? ""),
+                    new XAttribute("background", fullMetadata.Background ?? ""),
+                    new XAttribute("movieoffset", fullMetadata.MovieOffset?.ToString() ?? ""),
+                    new XAttribute("scoremode", fullMetadata.ScoreMode ?? 1)
+                ));
+            }
 
             foreach (var course in courses)
             {

@@ -67,27 +67,27 @@
   },
   "hotPaths": [
     {
+      "path": "FileReader.cs",
+      "accessCount": 33,
+      "lastAccessed": 1775156975259,
+      "type": "file"
+    },
+    {
       "path": "TJAParser.cs",
       "accessCount": 16,
       "lastAccessed": 1775151390808,
       "type": "file"
     },
     {
-      "path": "FileReader.cs",
-      "accessCount": 16,
-      "lastAccessed": 1775155457003,
-      "type": "file"
-    },
-    {
       "path": "CacheManager.cs",
-      "accessCount": 4,
-      "lastAccessed": 1775153806780,
+      "accessCount": 14,
+      "lastAccessed": 1775156891115,
       "type": "file"
     },
     {
       "path": "FolderMetadataResolver.cs",
-      "accessCount": 4,
-      "lastAccessed": 1775155081421,
+      "accessCount": 12,
+      "lastAccessed": 1775156763037,
       "type": "file"
     },
     {
