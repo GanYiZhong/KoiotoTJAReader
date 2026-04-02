@@ -27,6 +27,9 @@ namespace ZhongTaiko.TJAReader
             "Logs",
             "TJAReader_debug.txt");
 
+        // Cache detected encodings to avoid redundant detection on repeated reads
+        private static readonly Dictionary<string, string> EncodingCache = new Dictionary<string, string>();
+
         static FolderMetadataResolver()
         {
             try
@@ -410,9 +413,36 @@ namespace ZhongTaiko.TJAReader
             byteCount = bytes.Length;
             string text;
 
+            // Check encoding cache first (huge speedup for repeated reads)
+            if (EncodingCache.TryGetValue(path, out var cachedEncoding))
+            {
+                encodingUsed = cachedEncoding;
+                try
+                {
+                    if (cachedEncoding == "utf-8-bom")
+                    {
+                        text = new UTF8Encoding(true, true).GetString(bytes);
+                    }
+                    else if (cachedEncoding == "utf-8")
+                    {
+                        text = Encoding.UTF8.GetString(bytes);
+                    }
+                    else
+                    {
+                        text = Encoding.GetEncoding(int.Parse(cachedEncoding.Split('_')[0])).GetString(bytes);
+                    }
+                    return text.TrimStart('\uFEFF');
+                }
+                catch
+                {
+                    // Cache entry invalid, fall through to re-detect
+                }
+            }
+
             if (HasUtf8Bom(bytes))
             {
                 encodingUsed = "utf-8-bom";
+                EncodingCache[path] = encodingUsed;
                 text = new UTF8Encoding(true, true).GetString(bytes);
                 return text.TrimStart('\uFEFF');
             }
@@ -420,6 +450,7 @@ namespace ZhongTaiko.TJAReader
             if (TryDecode(bytes, new UTF8Encoding(false, true), out text))
             {
                 encodingUsed = "utf-8";
+                EncodingCache[path] = encodingUsed;
                 return text.TrimStart('\uFEFF');
             }
 
@@ -441,12 +472,14 @@ namespace ZhongTaiko.TJAReader
             if (bestCandidate != null)
             {
                 encodingUsed = bestCandidate.Name;
+                EncodingCache[path] = encodingUsed;
                 Trace($"Encoding selected: {encodingUsed} (score={bestCandidate.Score}) for {path}");
                 return bestCandidate.Text.TrimStart('\uFEFF');
             }
 
             // All encoding candidates unavailable — fall back to UTF-8 (lossy but functional)
             encodingUsed = "utf-8-fallback";
+            EncodingCache[path] = encodingUsed;
             Trace($"Encoding fallback: no CodePages available, using UTF-8 for {path}");
             return Encoding.UTF8.GetString(bytes).TrimStart('\uFEFF');
         }
