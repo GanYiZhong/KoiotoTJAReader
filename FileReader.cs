@@ -31,6 +31,35 @@ namespace ZhongTaiko.TJAReader
             return new string[] { ".tja" };
         }
 
+        /// <summary>
+        /// Batch-load multiple TJA files in parallel for faster folder loading.
+        /// Called by Koioto when loading a folder - processes all files concurrently.
+        /// </summary>
+        public SongSelectMetadata[] GetSelectableBatch(string[] filePaths)
+        {
+            if (filePaths == null || filePaths.Length == 0)
+                return new SongSelectMetadata[0];
+
+            var results = new SongSelectMetadata[filePaths.Length];
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            FolderMetadataResolver.Trace($"GetSelectableBatch start: {filePaths.Length} files");
+
+            // Process files in parallel (up to CPU core count)
+            var options = new System.Threading.Tasks.ParallelOptions
+            {
+                MaxDegreeOfParallelism = System.Environment.ProcessorCount
+            };
+
+            System.Threading.Tasks.Parallel.For(0, filePaths.Length, options, i =>
+            {
+                results[i] = GetSelectable(filePaths[i]);
+            });
+
+            sw.Stop();
+            FolderMetadataResolver.Trace($"GetSelectableBatch complete: {filePaths.Length} files in {sw.ElapsedMilliseconds}ms");
+            return results;
+        }
+
         public SongSelectMetadata GetSelectable(string filePath)
         {
             try
