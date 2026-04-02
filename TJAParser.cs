@@ -396,7 +396,13 @@ namespace ZhongTaiko.TJAReader
                             else if (cmd == "#n") { prepassCurrentPath = "n"; if (prepassCurrentPath == selectedBranch) hasAnyActiveContent = true; }
                             else if (cmd == "#e") { prepassCurrentPath = "e"; if (prepassCurrentPath == selectedBranch) hasAnyActiveContent = true; }
                             else if (cmd == "#m") { prepassCurrentPath = "m"; if (prepassCurrentPath == selectedBranch) hasAnyActiveContent = true; }
-                            else if (cmd == "#section" || cmd.StartsWith("#levelhold"))
+                            else if (cmd == "#section")
+                            {
+                                // #SECTION marks end of current branch section (implicit #BRANCHEND)
+                                prepassInBranch = false;
+                                prepassCurrentPath = null;
+                            }
+                            else if (cmd.StartsWith("#levelhold"))
                             {
                                 // Branch metadata - don't count as active content
                             }
@@ -429,10 +435,10 @@ namespace ZhongTaiko.TJAReader
                         if (prepassInBranch && prepassCurrentPath != selectedBranch)
                             continue;
 
-                        hasAnyActiveContent = true;
                         if (!string.IsNullOrWhiteSpace(line))
                         {
-                            prepassSeenNote = true; // only mark after real note content, not empty trailing strings
+                            prepassSeenNote = true;
+                            hasAnyActiveContent = true;
                             notesElementCount++;
                             foreach (var digit in line)
                             {
@@ -444,9 +450,10 @@ namespace ZhongTaiko.TJAReader
                         }
                     }
 
-                    // If this measure is entirely within an inactive branch, skip it
-                    // (no measure chip, no time advancement, no measureCount increment)
-                    if (inBranch && !hasAnyActiveContent)
+                    // If this measure has no active content AND involves branching structure, skip it.
+                    // Covers both inactive-branch measures (inBranch=true) and branch-start transition
+                    // measures where inBranch is still false but prepassInBranch became true.
+                    if (!hasAnyActiveContent && (inBranch || prepassInBranch))
                     {
                         measureFullyInactive = true;
                     }
@@ -460,7 +467,7 @@ namespace ZhongTaiko.TJAReader
                             {
                                 var cmd = line.ToLower().Trim();
                                 if (cmd.StartsWith("#branchstart")) { inBranch = true; currentBranchPath = null; }
-                                else if (cmd == "#branchend") { inBranch = false; currentBranchPath = null; }
+                                else if (cmd == "#branchend" || cmd == "#section") { inBranch = false; currentBranchPath = null; }
                                 else if (cmd == "#n") currentBranchPath = "n";
                                 else if (cmd == "#e") currentBranchPath = "e";
                                 else if (cmd == "#m") currentBranchPath = "m";
@@ -627,9 +634,15 @@ namespace ZhongTaiko.TJAReader
                                 currentBranchPath = "m";
                                 continue;
                             }
-                            else if (command == "#section" || command.StartsWith("#levelhold"))
+                            else if (command == "#section")
                             {
-                                // No-op for fixed-path playback
+                                // #SECTION marks end of current branch section (implicit #BRANCHEND)
+                                inBranch = false;
+                                currentBranchPath = null;
+                                continue;
+                            }
+                            else if (command.StartsWith("#levelhold"))
+                            {
                                 continue;
                             }
 
