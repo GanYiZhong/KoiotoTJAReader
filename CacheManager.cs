@@ -36,7 +36,10 @@ namespace ZhongTaiko.TJAReader
             if (_cacheDoc == null)
                 return false;
 
-            var fileElem = _cacheDoc.Root?.Elements("file").FirstOrDefault(e => (string)e.Attribute("path") == filePath);
+            // Normalize path to handle case/separator differences
+            var normalizedPath = NormalizePath(filePath);
+
+            var fileElem = _cacheDoc.Root?.Elements("file").FirstOrDefault(e => NormalizePath((string)e.Attribute("path")) == normalizedPath);
             if (fileElem == null)
                 return false;
 
@@ -181,6 +184,16 @@ namespace ZhongTaiko.TJAReader
                 System.Diagnostics.Debug.WriteLine($"[CacheManager] Failed to compute hash for {filePath}: {ex.Message}");
                 return "";
             }
+        }
+
+        private string NormalizePath(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+                return "";
+
+            // Convert to full path and normalize separators
+            var fullPath = Path.GetFullPath(path).ToUpperInvariant();
+            return fullPath.Replace('\\', '/');
         }
     }
 }
