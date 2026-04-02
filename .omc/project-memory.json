@@ -1,0 +1,107 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1775148503675,
+  "projectRoot": "D:\\koioto\\TJAReader",
+  "techStack": {
+    "languages": [
+      {
+        "name": "C/C++",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "Makefile"
+        ]
+      }
+    ],
+    "frameworks": [],
+    "packageManager": null,
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": "make build",
+    "testCommand": "make test",
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [],
+    "gitBranches": null
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "obj": {
+      "path": "obj",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1775148503640,
+      "keyFiles": []
+    },
+    "packages": {
+      "path": "packages",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1775148503641,
+      "keyFiles": [
+        "System.Text.Encoding.CodePages.8.0.0.nupkg",
+        "System.Text.Encoding.CodePages.8.0.0.zip"
+      ]
+    },
+    "Properties": {
+      "path": "Properties",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1775148503642,
+      "keyFiles": [
+        "AssemblyInfo.cs"
+      ]
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "TJAParser.cs",
+      "accessCount": 16,
+      "lastAccessed": 1775151390808,
+      "type": "file"
+    },
+    {
+      "path": "FileReader.cs",
+      "accessCount": 14,
+      "lastAccessed": 1775153810839,
+      "type": "file"
+    },
+    {
+      "path": "CacheManager.cs",
+      "accessCount": 4,
+      "lastAccessed": 1775153806780,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\User\\AppData\\Local\\Temp\\claude\\D--koioto\\aef785ef-854a-46b7-9b71-a4e9d584f719\\tasks\\b6vvrikba.output",
+      "accessCount": 3,
+      "lastAccessed": 1775151378106,
+      "type": "file"
+    },
+    {
+      "path": "TJAReader.csproj",
+      "accessCount": 2,
+      "lastAccessed": 1775153757820,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\User\\AppData\\Local\\Temp\\claude\\D--koioto\\aef785ef-854a-46b7-9b71-a4e9d584f719\\tasks\\bnyz0mwgf.output",
+      "accessCount": 1,
+      "lastAccessed": 1775150590779,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}

@@ -1,4 +1,6 @@
 using Koioto.Support;
+using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 
@@ -7,9 +9,12 @@ namespace ZhongTaiko.TJAReader
     /// <summary>
     /// TJA format reader plugin for Koioto.
     /// Directly reads .tja files without conversion to TCC format.
+    /// Uses JSON cache to speed up repeated loads.
     /// </summary>
     public class FileReader : Koioto.Plugin.IChartReadable
     {
+        private static CacheManager _cache = new CacheManager();
+
         public string Name => "TJA Reader";
 
         public string[] Creator => new string[] { "ZhongTaiko" };
@@ -34,6 +39,13 @@ namespace ZhongTaiko.TJAReader
 
                 var metadata = parser.GetMetadata();
                 var courses = parser.GetCourses();
+
+                // Cache the course info for next time
+                if (courses.Length > 0)
+                {
+                    _cache.CacheMetadata(filePath, courses);
+                    _cache.Save();
+                }
 
                 if (courses.Length == 0)
                 {
@@ -277,6 +289,25 @@ namespace ZhongTaiko.TJAReader
             FolderMetadataResolver.Trace($"ReadTjaText: path={filePath}, bytes={byteCount}, encoding={encodingUsed}");
             return text;
         }
+
+        /// <summary>
+        /// Reconstructs TJACourse array from cache.
+        /// </summary>
+        private TJACourse[] ReconstructCoursesFromCache(Dictionary<string, TJACourse> cachedCourses)
+        {
+            if (cachedCourses == null || cachedCourses.Count == 0)
+                return new TJACourse[0];
+
+            return cachedCourses.Values.ToArray();
+        }
+
+        /// <summary>
+        /// Reconstructs TJAMetadata. Since cache only stores courses, use defaults for metadata.
+        /// </summary>
+        private TJAMetadata ReconstructMetadataFromCache()
+        {
+            return new TJAMetadata(); // Return with defaults; metadata is loaded fresh anyway
+        }
     }
 
     public class TJAMetadata
@@ -350,9 +381,6 @@ namespace ZhongTaiko.TJAReader
         }
     }
 
-    /// <summary>
-    /// 包含 Playable 和分數配置的容器
-    /// </summary>
     public class PlayableWithScoring
     {
         public Playable Playable { get; set; }

@@ -2,3 +2,5 @@ D:\koioto\TJAReader\obj\Release\TJAReader.csproj.AssemblyReference.cache
 D:\koioto\TJAReader\obj\Release\TJAReader.csproj.CoreCompileInputs.cache
 D:\koioto\Plugins\TJAReader.dll
 D:\koioto\TJAReader\obj\Release\TJAReader.dll
+D:\koioto\TJAReader\obj\Release\TJAReader.csproj.Up2Date
+D:\koioto\_tjareader_build_test\TJAReader.dll
