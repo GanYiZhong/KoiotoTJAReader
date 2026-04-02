@@ -37,7 +37,18 @@ namespace ZhongTaiko.TJAReader
         public TJACourseData GetCourse(string difficulty)
         {
             var key = difficulty.ToLower();
-            return _courses.ContainsKey(key) ? _courses[key] : null;
+            if (_courses.ContainsKey(key))
+            {
+                var course = _courses[key];
+                System.Diagnostics.Debug.WriteLine($"[TJAParser.GetCourse] Loading '{difficulty}' -> key='{key}', Balloon array length={course?.Balloon?.Length ?? 0}");
+                if (course?.Balloon != null && course.Balloon.Length > 0)
+                {
+                    System.Diagnostics.Debug.WriteLine($"  Balloon values: {string.Join(",", course.Balloon.Select(b => b?.ToString() ?? "null"))}");
+                }
+                return course;
+            }
+            System.Diagnostics.Debug.WriteLine($"[TJAParser.GetCourse] '{difficulty}' not found. Available courses: {string.Join(", ", _courses.Keys)}");
+            return null;
         }
 
         private void Parse()
@@ -83,8 +94,6 @@ namespace ZhongTaiko.TJAReader
                             currentCourseData.Scoreinit = preservedScoreinit;
                         if (preservedScorediff > 0)
                             currentCourseData.Scorediff = preservedScorediff;
-
-                        System.Diagnostics.Debug.WriteLine($"[TJAReader] #START: Preserved BALLOON={preservedBalloon?.Length ?? 0} entries, SCOREINIT={preservedScoreinit}, SCOREDIFF={preservedScorediff}");
 
                         currentMeasure = new List<string>();
                         continue;
@@ -200,6 +209,7 @@ namespace ZhongTaiko.TJAReader
                         }
 
                         inChart = false;
+                        currentCourseData = new TJACourseData { Measures = new List<string[]>() };
                         currentCourse = "";
                         continue;
                     }
@@ -317,6 +327,12 @@ namespace ZhongTaiko.TJAReader
                 var sections = playable.Sections;
                 sections[0] = new List<Chip>();
                 var balloonIndex = 0;
+
+                // Debug: log balloon array
+                if (courseData?.Balloon != null && courseData.Balloon.Length > 0)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[TJAParser] Loaded Balloon array ({courseData.Balloon.Length} values): {string.Join(",", courseData.Balloon.Select(b => b?.ToString() ?? "null"))}");
+                }
 
                 var list = sections[0];
 
@@ -477,7 +493,10 @@ namespace ZhongTaiko.TJAReader
                                 // Advance balloon index for balloon notes in skipped branches
                                 foreach (var digit in line)
                                 {
-                                    if (digit == '7') balloonIndex++;
+                                    if (ConsumesBalloonEntry(digit))
+                                    {
+                                        balloonIndex++;
+                                    }
                                 }
                             }
                         }
@@ -493,12 +512,6 @@ namespace ZhongTaiko.TJAReader
                     var originalBPM = effectiveBPM;
                     var originalMeasureRate = effectiveMeasure.GetRate();
 
-                    // Log PRE-CLAMP values if suspicious
-                    if (originalNotesCount <= 0 || originalBPM <= 0 || originalMeasureRate <= 0)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"[TJAReader] PRE-CLAMP WARN Measure {measureCount}: notesCount={originalNotesCount}, bpm={originalBPM}, measureRate={originalMeasureRate}, scroll={nowScroll}");
-                    }
-
                     if (notesCount == 0)
                         notesCount = 1;
 
@@ -507,12 +520,6 @@ namespace ZhongTaiko.TJAReader
                     if (measureDuration <= 0)
                         measureDuration = 1;
                     var timePerNotes = (long)(measureDuration / notesCount);
-
-                    // Log POST-TRUNCATE for zero timing
-                    if (timePerNotes == 0)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"[TJAReader] POST-TRUNCATE WARN Measure {measureCount}: timePerNotes=0 (collapsed). duration={measureDuration}, notesCount={notesCount}, original_duration={originalMeasureDuration}");
-                    }
 
                     foreach (var line in measure)
                     {
@@ -524,7 +531,7 @@ namespace ZhongTaiko.TJAReader
                                 // Inactive branch: only advance balloonIndex for balloon notes
                                 foreach (var digit in line)
                                 {
-                                    if (digit == '7') // Balloon note
+                                    if (ConsumesBalloonEntry(digit))
                                     {
                                         balloonIndex++;
                                     }
@@ -580,11 +587,13 @@ namespace ZhongTaiko.TJAReader
                                                 var balloonHits = courseData.Balloon[balloonIndex] ?? 5;
                                                 // Ensure RollObjective is at least 1 to prevent DivideByZeroException in Koioto
                                                 noteChip.RollObjective = balloonHits > 0 ? balloonHits : 1;
+                                                System.Diagnostics.Debug.WriteLine($"[Balloon] M{measureCount} idx={balloonIndex} value={balloonHits}");
                                                 balloonIndex++;
                                             }
                                             else
                                             {
                                                 noteChip.RollObjective = 5;
+                                                System.Diagnostics.Debug.WriteLine($"[Balloon] M{measureCount} OOB idx={balloonIndex}/{courseData.Balloon.Length}");
                                             }
                                         }
                                     }
@@ -793,9 +802,15 @@ namespace ZhongTaiko.TJAReader
                     case '5': return Notes.RollStart;
                     case '6': return Notes.ROLLStart;
                     case '7': return Notes.Balloon;
+                    case '9': return Notes.Balloon;
                     case '8': return Notes.RollEnd;
                     default: return Notes.Space;
                 }
+            }
+
+            private static bool ConsumesBalloonEntry(char ch)
+            {
+                return ch == '7' || ch == '9';
             }
         }
     }
