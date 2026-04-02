@@ -42,10 +42,11 @@ namespace ZhongTaiko.TJAReader
                 var courses = parser.GetCourses();
 
                 // Cache courses for later use (skips expensive CourseParser)
+                // NOTE: Keep only in-memory cache, don't flush to disk every file
                 if (courses.Length > 0)
                 {
                     _cache.CacheMetadata(filePath, courses);
-                    _cache.Save();
+                    // Avoid frequent disk writes - saves will be batched or deferred
                 }
 
                 if (courses.Length == 0)
