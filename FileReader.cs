@@ -35,18 +35,34 @@ namespace ZhongTaiko.TJAReader
             {
                 FolderMetadataResolver.Trace($"GetSelectable start: filePath={filePath}");
 
-                // Always read metadata (fast - just string parsing)
-                var tjaText = ReadTjaText(filePath);
-                var parser = new TJAParser(tjaText);
-                var metadata = parser.GetMetadata();
-                var courses = parser.GetCourses();
+                TJAMetadata metadata = null;
+                TJACourse[] courses = null;
 
-                // Cache courses for later use (skips expensive CourseParser)
-                // NOTE: Keep only in-memory cache, don't flush to disk every file
-                if (courses.Length > 0)
+                // Check cache FIRST - skip parse if valid
+                if (_cache.IsCacheValid(filePath))
                 {
-                    _cache.CacheMetadata(filePath, courses);
-                    // Avoid frequent disk writes - saves will be batched or deferred
+                    FolderMetadataResolver.Trace($"[Cache HIT] Skipping parse for {filePath}");
+                    var cachedCourses = _cache.GetCachedCourses(filePath);
+                    if (cachedCourses != null && cachedCourses.Count > 0)
+                    {
+                        metadata = new TJAMetadata();
+                        courses = cachedCourses.Values.ToArray();
+                    }
+                }
+
+                // If cache miss, parse the file
+                if (metadata == null || courses == null || courses.Length == 0)
+                {
+                    FolderMetadataResolver.Trace($"[Cache MISS] Parsing {filePath}");
+                    var tjaText = ReadTjaText(filePath);
+                    var parser = new TJAParser(tjaText);
+                    metadata = parser.GetMetadata();
+                    courses = parser.GetCourses();
+
+                    if (courses.Length > 0)
+                    {
+                        _cache.CacheMetadata(filePath, courses);
+                    }
                 }
 
                 if (courses.Length == 0)
