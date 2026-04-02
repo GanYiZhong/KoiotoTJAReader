@@ -23,6 +23,98 @@ namespace ZhongTaiko.TJAReader
         private static readonly object _preloadLock = new object();
         private static string _lastFolderPath = null;
 
+        // DLL Injection: AppDomain hook to pre-load all folders when Koioto initializes
+        private static bool _injectionEnabled = true;  // Can be disabled if Koioto breaks
+        private static bool _injectionHooked = false;
+
+        /// <summary>
+        /// DLL Injection via AppDomain.AssemblyLoad hook.
+        /// Intercepts Koioto.dll initialization to pre-load all song folders.
+        /// Runs in background while Koioto continues with UI rendering.
+        /// </summary>
+        static FileReader()
+        {
+            try
+            {
+                if (!_injectionEnabled)
+                    return;
+
+                // Check if Koioto is already loaded
+                var koiotoAsm = AppDomain.CurrentDomain.GetAssemblies()
+                    .FirstOrDefault(a => a.GetName().Name == "Koioto");
+
+                if (koiotoAsm != null)
+                {
+                    // Koioto already loaded - pre-load immediately
+                    FolderMetadataResolver.Trace("[Injection] Koioto already loaded, pre-loading folders immediately");
+                    PreloadAllSongFolders();
+                    return;
+                }
+
+                // Hook AssemblyLoad to detect when Koioto loads
+                AppDomain.CurrentDomain.AssemblyLoad += (sender, args) =>
+                {
+                    if (_injectionHooked)
+                        return;
+
+                    if (args.LoadedAssembly.GetName().Name == "Koioto")
+                    {
+                        _injectionHooked = true;
+                        FolderMetadataResolver.Trace("[Injection] Koioto.dll detected, triggering folder pre-load");
+
+                        // Pre-load all folders in background (non-blocking)
+                        System.Threading.Tasks.Task.Run(() => PreloadAllSongFolders());
+                    }
+                };
+
+                FolderMetadataResolver.Trace("[Injection] AppDomain.AssemblyLoad hook installed");
+            }
+            catch (Exception ex)
+            {
+                FolderMetadataResolver.Trace($"[Injection] Error during setup: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Enumerate and pre-load all song folders found in common locations.
+        /// Runs in background thread to avoid blocking UI.
+        /// </summary>
+        private static void PreloadAllSongFolders()
+        {
+            try
+            {
+                var songLocations = new[]
+                {
+                    "D:\\koioto\\Songs",
+                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Songs"),
+                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Charts"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Koioto\\Songs")
+                };
+
+                foreach (var songDir in songLocations.Where(d => Directory.Exists(d)))
+                {
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    var folderCount = 0;
+
+                    // Pre-load each subfolder
+                    foreach (var subfolder in Directory.EnumerateDirectories(songDir))
+                    {
+                        var dummyPath = Path.Combine(subfolder, "dummy.tja");
+                        TryStartFolderPreload(dummyPath);
+                        folderCount++;
+                    }
+
+                    sw.Stop();
+                    FolderMetadataResolver.Trace($"[Injection] Pre-load triggered for {folderCount} folders in {songDir} ({sw.ElapsedMilliseconds}ms)");
+                    break;
+                }
+            }
+            catch (Exception ex)
+            {
+                FolderMetadataResolver.Trace($"[Injection] Error during folder pre-load: {ex.Message}");
+            }
+        }
+
         public string Name => "TJA Reader";
 
         public string[] Creator => new string[] { "ZhongTaiko" };
