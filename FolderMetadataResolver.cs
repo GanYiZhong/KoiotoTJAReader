@@ -31,6 +31,16 @@ namespace ZhongTaiko.TJAReader
         {
             try
             {
+                // Register CodePages encoding provider for Shift-JIS, GBK, EUC-JP in .NET Core
+                Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+            }
+            catch
+            {
+                // CodePages not available - will fall back to UTF-8 only
+            }
+
+            try
+            {
                 var generated = RunInitialScan();
                 if (generated > 0)
                 {
@@ -389,7 +399,12 @@ namespace ZhongTaiko.TJAReader
             return s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "\\r");
         }
 
-        private static string ReadTextWithDetection(string path, out string encodingUsed, out int byteCount)
+        internal static string ReadTextWithDetection(string path)
+        {
+            return ReadTextWithDetection(path, out _, out _);
+        }
+
+        internal static string ReadTextWithDetection(string path, out string encodingUsed, out int byteCount)
         {
             var bytes = File.ReadAllBytes(path);
             byteCount = bytes.Length;
@@ -398,20 +413,42 @@ namespace ZhongTaiko.TJAReader
             if (HasUtf8Bom(bytes))
             {
                 encodingUsed = "utf-8-bom";
-                text = new UTF8Encoding(true).GetString(bytes);
+                text = new UTF8Encoding(true, true).GetString(bytes);
                 return text.TrimStart('\uFEFF');
             }
 
-            if (LooksLikeUtf8(bytes))
+            if (TryDecode(bytes, new UTF8Encoding(false, true), out text))
             {
                 encodingUsed = "utf-8";
-                text = Encoding.UTF8.GetString(bytes);
                 return text.TrimStart('\uFEFF');
             }
 
-            encodingUsed = "shift_jis";
-            text = Encoding.GetEncoding("shift_jis").GetString(bytes);
-            return text.TrimStart('\uFEFF');
+            var candidates = new List<DecodedTextCandidate>();
+            AddDecodeCandidate(candidates, bytes, 932, "shift_jis", path, 0);
+            AddDecodeCandidate(candidates, bytes, 936, "gbk", path, 1);
+
+            DecodedTextCandidate bestCandidate = null;
+            foreach (var candidate in candidates)
+            {
+                if (bestCandidate == null
+                    || candidate.Score > bestCandidate.Score
+                    || (candidate.Score == bestCandidate.Score && candidate.Priority < bestCandidate.Priority))
+                {
+                    bestCandidate = candidate;
+                }
+            }
+
+            if (bestCandidate != null)
+            {
+                encodingUsed = bestCandidate.Name;
+                Trace($"Encoding selected: {encodingUsed} (score={bestCandidate.Score}) for {path}");
+                return bestCandidate.Text.TrimStart('\uFEFF');
+            }
+
+            // All encoding candidates unavailable — fall back to UTF-8 (lossy but functional)
+            encodingUsed = "utf-8-fallback";
+            Trace($"Encoding fallback: no CodePages available, using UTF-8 for {path}");
+            return Encoding.UTF8.GetString(bytes).TrimStart('\uFEFF');
         }
 
         private static bool HasUtf8Bom(byte[] bytes)
@@ -419,42 +456,154 @@ namespace ZhongTaiko.TJAReader
             return bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF;
         }
 
-        private static bool LooksLikeUtf8(byte[] bytes)
+        private static void AddDecodeCandidate(List<DecodedTextCandidate> candidates, byte[] bytes, int codePage, string encodingName, string path, int priority)
         {
-            var i = 0;
-            while (i < bytes.Length)
+            try
             {
-                var b = bytes[i];
+                // Use lenient decode directly (fast, never throws)
+                var text = Encoding.GetEncoding(codePage).GetString(bytes);
+                var score = ScoreDecodedText(path, text, encodingName);
 
-                if (b <= 0x7F)
+                candidates.Add(new DecodedTextCandidate
                 {
-                    i++;
-                    continue;
-                }
+                    Name = encodingName,
+                    Text = text,
+                    Score = score,
+                    Priority = priority
+                });
+            }
+            catch (NotSupportedException)
+            {
+                // Encoding not available (e.g. .NET Core without CodePages) — skip this candidate
+            }
+        }
 
-                int expectedContinuationBytes;
-                if ((b & 0xE0) == 0xC0)
-                    expectedContinuationBytes = 1;
-                else if ((b & 0xF0) == 0xE0)
-                    expectedContinuationBytes = 2;
-                else if ((b & 0xF8) == 0xF0)
-                    expectedContinuationBytes = 3;
-                else
-                    return false;
+        private static Encoding GetStrictEncoding(int codePage)
+        {
+            return Encoding.GetEncoding(
+                codePage,
+                EncoderFallback.ExceptionFallback,
+                DecoderFallback.ExceptionFallback);
+        }
 
-                if (i + expectedContinuationBytes >= bytes.Length)
-                    return false;
+        private static bool TryDecode(byte[] bytes, Encoding encoding, out string text)
+        {
+            try
+            {
+                text = encoding.GetString(bytes);
+                return true;
+            }
+            catch (DecoderFallbackException)
+            {
+                text = null;
+                return false;
+            }
+        }
 
-                for (var j = 1; j <= expectedContinuationBytes; j++)
-                {
-                    if ((bytes[i + j] & 0xC0) != 0x80)
-                        return false;
-                }
+        private static int ScoreDecodedText(string path, string text, string encodingName)
+        {
+            if (string.IsNullOrEmpty(text))
+                return 0;
 
-                i += expectedContinuationBytes + 1;
+            var score = 0;
+            var upperText = text.ToUpperInvariant();
+
+            if (upperText.Contains("TITLE:")) score += 30;
+            if (upperText.Contains("SUBTITLE:")) score += 20;
+            if (upperText.Contains("WAVE:")) score += 20;
+            if (upperText.Contains("COURSE:")) score += 20;
+            if (upperText.Contains("LEVEL:")) score += 15;
+            if (upperText.Contains("#START")) score += 30;
+            if (upperText.Contains("#END")) score += 30;
+            if (upperText.Contains("#GENRE")) score += 30;
+            if (upperText.Contains("GENRENAME=")) score += 30;
+
+            var controlCount = 0;
+            var suspiciousScriptCount = 0;
+            var cjkCount = 0;
+            var kanaCount = 0;
+
+            foreach (var ch in text)
+            {
+                if (ch == '\0')
+                    score -= 100;
+
+                if (char.IsControl(ch) && ch != '\r' && ch != '\n' && ch != '\t')
+                    controlCount++;
+
+                if (IsCjk(ch))
+                    cjkCount++;
+
+                if (IsJapaneseKana(ch))
+                    kanaCount++;
+
+                if (IsSuspiciousScript(ch))
+                    suspiciousScriptCount++;
             }
 
-            return true;
+            score -= controlCount * 20;
+            score -= suspiciousScriptCount * 4;
+
+            if (kanaCount > 0)
+                score += 20;
+
+            if (cjkCount > 0)
+                score += 10;
+
+            if (encodingName == "shift_jis" || encodingName == "euc-jp")
+            {
+                if (kanaCount > 0)
+                    score += 15;
+            }
+            else if (encodingName == "gbk")
+            {
+                // Only penalize GBK when kana detected (strong Japanese indicator)
+                if (kanaCount > 0)
+                    score -= 10;
+            }
+
+            var extension = Path.GetExtension(path) ?? string.Empty;
+            if (extension.Equals(".ini", StringComparison.OrdinalIgnoreCase) && upperText.Contains("GENRENAME="))
+                score += 20;
+
+            if (extension.Equals(".def", StringComparison.OrdinalIgnoreCase) && upperText.Contains("#GENRE"))
+                score += 20;
+
+            if (extension.Equals(".tja", StringComparison.OrdinalIgnoreCase) && upperText.Contains("#START"))
+                score += 20;
+
+            return score;
+        }
+
+        private static bool IsCjk(char ch)
+        {
+            return (ch >= '\u3400' && ch <= '\u4DBF')
+                || (ch >= '\u4E00' && ch <= '\u9FFF')
+                || (ch >= '\uF900' && ch <= '\uFAFF');
+        }
+
+        private static bool IsJapaneseKana(char ch)
+        {
+            return (ch >= '\u3040' && ch <= '\u309F')
+                || (ch >= '\u30A0' && ch <= '\u30FF')
+                || (ch >= '\uFF66' && ch <= '\uFF9D');
+        }
+
+        private static bool IsSuspiciousScript(char ch)
+        {
+            return (ch >= '\u0080' && ch <= '\u009F')
+                || (ch >= '\u0370' && ch <= '\u03FF')
+                || (ch >= '\u0400' && ch <= '\u04FF')
+                || (ch >= '\uE000' && ch <= '\uF8FF')
+                || ch == '\uFFFD';
+        }
+
+        private sealed class DecodedTextCandidate
+        {
+            public string Name { get; set; }
+            public string Text { get; set; }
+            public int Score { get; set; }
+            public int Priority { get; set; }
         }
 
         internal static void Trace(string message)

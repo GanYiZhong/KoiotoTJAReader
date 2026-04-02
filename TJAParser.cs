@@ -204,6 +204,13 @@ namespace ZhongTaiko.TJAReader
                         continue;
                     }
 
+                    // Mid-chart # commands: keep as single line in measure (don't split by comma)
+                    if (line.StartsWith("#") && !line.Equals("#END", StringComparison.InvariantCultureIgnoreCase))
+                    {
+                        currentMeasure.Add(line);
+                        continue;
+                    }
+
                     // Handle measures (comma-separated)
                     if (line.Contains(","))
                     {
@@ -328,6 +335,11 @@ namespace ZhongTaiko.TJAReader
                 var barVisible = true;
                 Chip rollstartChip = null;
 
+                // Branch state machine (譜面分岐)
+                var inBranch = false;
+                string currentBranchPath = null; // "n", "e", or "m"
+                const string selectedBranch = "m"; // Master branch (hardest path, as engine does not support dynamic branching)
+
                 var offset = metadata.Offset ?? 0;
                 if (offset < 0)
                 {
@@ -356,10 +368,71 @@ namespace ZhongTaiko.TJAReader
                     var notesCount = 0;
                     var notesElementCount = 0;
 
+                    // Pre-pass: count notes only from active branch, detect fully inactive measures
+                    // Also capture effective #MEASURE and #BPMCHANGE that precede notes in this measure
+                    var prepassInBranch = inBranch;
+                    var prepassCurrentPath = currentBranchPath;
+                    var measureFullyInactive = false; // true if this measure is entirely within an inactive branch
+                    var hasAnyActiveContent = false;
+                    var effectiveMeasure = nowMeasure;
+                    var effectiveBPM = nowBPM;
+                    var prepassSeenNote = false;
                     foreach (var line in measure)
                     {
-                        if (!line.StartsWith("#") && !string.IsNullOrWhiteSpace(line))
+                        if (line.StartsWith("#"))
                         {
+                            var cmd = line.ToLower().Trim();
+                            if (cmd.StartsWith("#branchstart"))
+                            {
+                                prepassInBranch = true;
+                                prepassCurrentPath = null;
+                            }
+                            else if (cmd == "#branchend")
+                            {
+                                prepassInBranch = false;
+                                prepassCurrentPath = null;
+                                // Don't set hasAnyActiveContent - branch exit is metadata, not renderable content
+                            }
+                            else if (cmd == "#n") { prepassCurrentPath = "n"; if (prepassCurrentPath == selectedBranch) hasAnyActiveContent = true; }
+                            else if (cmd == "#e") { prepassCurrentPath = "e"; if (prepassCurrentPath == selectedBranch) hasAnyActiveContent = true; }
+                            else if (cmd == "#m") { prepassCurrentPath = "m"; if (prepassCurrentPath == selectedBranch) hasAnyActiveContent = true; }
+                            else if (cmd == "#section" || cmd.StartsWith("#levelhold"))
+                            {
+                                // Branch metadata - don't count as active content
+                            }
+                            else if (!prepassInBranch || prepassCurrentPath == selectedBranch)
+                            {
+                                hasAnyActiveContent = true;
+                                // Capture MEASURE/BPM changes that precede the first note so measureDuration is correct
+                                if (!prepassSeenNote)
+                                {
+                                    var p2 = cmd.Contains(' ') ? cmd.Substring(cmd.IndexOf(' ')).Trim() : "";
+                                    if (cmd.StartsWith("#measure") || cmd.StartsWith("#tsign"))
+                                    {
+                                        var parts2 = p2.Split('/');
+                                        if (parts2.Length == 2 &&
+                                            double.TryParse(parts2[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var num2) &&
+                                            double.TryParse(parts2[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var den2))
+                                            effectiveMeasure = new Measure(num2, den2);
+                                    }
+                                    else if (cmd.StartsWith("#bpm"))
+                                    {
+                                        if (double.TryParse(p2, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var bpm2))
+                                            effectiveBPM = bpm2;
+                                    }
+                                }
+                            }
+                            continue;
+                        }
+
+                        // Skip notes from inactive branches
+                        if (prepassInBranch && prepassCurrentPath != selectedBranch)
+                            continue;
+
+                        hasAnyActiveContent = true;
+                        if (!string.IsNullOrWhiteSpace(line))
+                        {
+                            prepassSeenNote = true; // only mark after real note content, not empty trailing strings
                             notesElementCount++;
                             foreach (var digit in line)
                             {
@@ -371,11 +444,47 @@ namespace ZhongTaiko.TJAReader
                         }
                     }
 
+                    // If this measure is entirely within an inactive branch, skip it
+                    // (no measure chip, no time advancement, no measureCount increment)
+                    if (inBranch && !hasAnyActiveContent)
+                    {
+                        measureFullyInactive = true;
+                    }
+
+                    // If measure is fully in an inactive branch, only update branch state and balloon index, then skip
+                    if (measureFullyInactive)
+                    {
+                        foreach (var line in measure)
+                        {
+                            if (line.StartsWith("#"))
+                            {
+                                var cmd = line.ToLower().Trim();
+                                if (cmd.StartsWith("#branchstart")) { inBranch = true; currentBranchPath = null; }
+                                else if (cmd == "#branchend") { inBranch = false; currentBranchPath = null; }
+                                else if (cmd == "#n") currentBranchPath = "n";
+                                else if (cmd == "#e") currentBranchPath = "e";
+                                else if (cmd == "#m") currentBranchPath = "m";
+                            }
+                            else
+                            {
+                                // Advance balloon index for balloon notes in skipped branches
+                                foreach (var digit in line)
+                                {
+                                    if (digit == '7') balloonIndex++;
+                                }
+                            }
+                        }
+                        // Don't create measure chip, don't advance time, don't increment measureCount
+                        continue;
+                    }
+
                     // Capture original values before normalization
+                    // Use effectiveMeasure/effectiveBPM which reflect any #MEASURE/#BPMCHANGE
+                    // commands that appear before the first note in this measure
                     var originalNotesCount = notesCount;
-                    var originalMeasureDuration = GetMeasureDuration(nowMeasure, nowBPM);
-                    var originalBPM = nowBPM;
-                    var originalMeasureRate = nowMeasure.GetRate();
+                    var originalMeasureDuration = GetMeasureDuration(effectiveMeasure, effectiveBPM);
+                    var originalBPM = effectiveBPM;
+                    var originalMeasureRate = effectiveMeasure.GetRate();
 
                     // Log PRE-CLAMP values if suspicious
                     if (originalNotesCount <= 0 || originalBPM <= 0 || originalMeasureRate <= 0)
@@ -402,6 +511,21 @@ namespace ZhongTaiko.TJAReader
                     {
                         if (!line.StartsWith("#"))
                         {
+                            // Note line: check if we're in an inactive branch
+                            if (inBranch && currentBranchPath != selectedBranch)
+                            {
+                                // Inactive branch: only advance balloonIndex for balloon notes
+                                foreach (var digit in line)
+                                {
+                                    if (digit == '7') // Balloon note
+                                    {
+                                        balloonIndex++;
+                                    }
+                                }
+                                continue;
+                            }
+
+                            // Active path (or not in a branch): process normally
                             if (isFirstNoteInMeasure)
                             {
                                 var measureChip = new Chip
@@ -475,10 +599,50 @@ namespace ZhongTaiko.TJAReader
                             var param = command.IndexOf(' ') >= 0 ?
                                 command.Substring(command.IndexOf(' ')).Trim() : "";
 
+                            // --- Branch commands (譜面分岐) ---
+                            if (command.StartsWith("#branchstart"))
+                            {
+                                inBranch = true;
+                                currentBranchPath = null;
+                                continue;
+                            }
+                            else if (command == "#branchend")
+                            {
+                                inBranch = false;
+                                currentBranchPath = null;
+                                continue;
+                            }
+                            else if (command == "#n")
+                            {
+                                currentBranchPath = "n";
+                                continue;
+                            }
+                            else if (command == "#e")
+                            {
+                                currentBranchPath = "e";
+                                continue;
+                            }
+                            else if (command == "#m")
+                            {
+                                currentBranchPath = "m";
+                                continue;
+                            }
+                            else if (command == "#section" || command.StartsWith("#levelhold"))
+                            {
+                                // No-op for fixed-path playback
+                                continue;
+                            }
+
+                            // Skip commands from inactive branches (don't mutate state)
+                            if (inBranch && currentBranchPath != selectedBranch)
+                                continue;
+
+                            // --- Normal commands (active path or non-branching) ---
                             var eventChip = new Chip();
 
                             if (command.StartsWith("#bpm"))
                             {
+                                // Matches #BPMCHANGE and #BPM
                                 if (double.TryParse(param, NumberStyles.Float, CultureInfo.InvariantCulture, out var bpm))
                                 {
                                     eventChip.ChipType = Chips.BPMChange;
@@ -489,19 +653,14 @@ namespace ZhongTaiko.TJAReader
                             {
                                 if (double.TryParse(param, NumberStyles.Float, CultureInfo.InvariantCulture, out var scroll))
                                 {
-                                    // Validate scroll > 0 to prevent downstream division/math errors
-                                    if (scroll > 0)
+                                    if (scroll != 0)
                                     {
                                         eventChip.ChipType = Chips.ScrollChange;
                                         nowScroll = scroll;
                                     }
-                                    else
-                                    {
-                                        System.Diagnostics.Debug.WriteLine($"[TJAReader] WARN: Invalid #SCROLL {scroll} at measure {measureCount} (must be > 0), keeping {nowScroll}");
-                                    }
                                 }
                             }
-                            else if (command.StartsWith("#gogobegin"))
+                            else if (command.StartsWith("#gogostart") || command.StartsWith("#gogobegin"))
                             {
                                 eventChip.ChipType = Chips.GoGoStart;
                                 isGoGoTime = true;
@@ -518,7 +677,7 @@ namespace ZhongTaiko.TJAReader
                                     nowTime += (long)(delay * 1000.0 * 1000.0);
                                 }
                             }
-                            else if (command.StartsWith("#measure"))
+                            else if (command.StartsWith("#measure") || command.StartsWith("#tsign"))
                             {
                                 var parts = param.Split('/');
                                 if (parts.Length == 2 &&
@@ -529,8 +688,19 @@ namespace ZhongTaiko.TJAReader
                                     nowMeasure = new Measure(part, beat);
                                 }
                             }
+                            else if (command.StartsWith("#barlineoff") || command == "#bar hide")
+                            {
+                                barVisible = false;
+                                continue; // No chip needed, affects next Measure chip
+                            }
+                            else if (command.StartsWith("#barlineon") || command == "#bar show")
+                            {
+                                barVisible = true;
+                                continue;
+                            }
                             else
                             {
+                                // Other unhandled commands
                                 continue;
                             }
 
@@ -558,7 +728,7 @@ namespace ZhongTaiko.TJAReader
                             Time = nowTime
                         };
                         list.Add(measureChip);
-                        nowTime += (long)GetMeasureDuration(nowMeasure, nowBPM);
+                        nowTime += (long)GetMeasureDuration(effectiveMeasure, effectiveBPM);
                     }
 
                     measureCount++;

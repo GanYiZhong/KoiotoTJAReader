@@ -1,7 +1,6 @@
 using Koioto.Support;
 using System.IO;
 using System.Linq;
-using System.Text;
 
 namespace ZhongTaiko.TJAReader
 {
@@ -30,7 +29,7 @@ namespace ZhongTaiko.TJAReader
             try
             {
                 FolderMetadataResolver.Trace($"GetSelectable start: filePath={filePath}");
-                var tjaText = File.ReadAllText(filePath, Encoding.UTF8);
+                var tjaText = ReadTjaText(filePath);
                 var parser = new TJAParser(tjaText);
 
                 var metadata = parser.GetMetadata();
@@ -54,7 +53,7 @@ namespace ZhongTaiko.TJAReader
                     BPM = metadata.BPM,
                     Artist = metadata.Artist?.Length > 0 ? metadata.Artist : new string[] { "" },
                     Creator = metadata.Creator?.Length > 0 ? metadata.Creator : new string[] { "" },
-                    PreviewSong = metadata.Audio != null ? GetPath(filePath, metadata.Audio) : null,
+                    PreviewSong = ResolveAudioPath(filePath, metadata.Audio),
                     SongPreviewTime = metadata.SongPreview,
                     AlbumartPath = (folderMeta.Albumart != null && folderMeta.Albumart.Length > 0)
                         ? GetPath(Path.GetDirectoryName(filePath), folderMeta.Albumart)
@@ -87,7 +86,7 @@ namespace ZhongTaiko.TJAReader
         {
             try
             {
-                var tjaText = File.ReadAllText(filePath, Encoding.UTF8);
+                var tjaText = ReadTjaText(filePath);
                 var parser = new TJAParser(tjaText);
 
                 var metadata = parser.GetMetadata();
@@ -117,7 +116,7 @@ namespace ZhongTaiko.TJAReader
         {
             try
             {
-                var tjaText = File.ReadAllText(filePath, Encoding.UTF8);
+                var tjaText = ReadTjaText(filePath);
                 var parser = new TJAParser(tjaText);
                 var metadata = parser.GetMetadata();
 
@@ -132,7 +131,7 @@ namespace ZhongTaiko.TJAReader
                 chartMetadata.Creator = new string[1][];
                 chartMetadata.Creator[0] = metadata.Creator ?? new string[] { "" };
 
-                chartMetadata.Audio = new string[1] { metadata.Audio != null ? GetPath(filePath, metadata.Audio) : null };
+                chartMetadata.Audio = new string[1] { ResolveAudioPath(filePath, metadata.Audio) };
 
                 chartMetadata.Background = new string[1];
                 chartMetadata.Background[0] = null;
@@ -161,7 +160,7 @@ namespace ZhongTaiko.TJAReader
         {
             try
             {
-                var tjaText = File.ReadAllText(filePath, Encoding.UTF8);
+                var tjaText = ReadTjaText(filePath);
                 var parser = new TJAParser(tjaText);
 
                 var metadata = parser.GetMetadata();
@@ -243,6 +242,40 @@ namespace ZhongTaiko.TJAReader
         private string GetPath(string origin, string target)
         {
             return Path.Combine(Path.GetDirectoryName(origin), target);
+        }
+
+        /// <summary>
+        /// Resolves audio path with fallback: if WAVE path doesn't exist,
+        /// search for audio file matching the TJA filename in same directory.
+        /// Handles cases where TITLE/WAVE fields have different characters than the actual filename.
+        /// </summary>
+        private string ResolveAudioPath(string tjaFilePath, string waveValue)
+        {
+            if (string.IsNullOrEmpty(waveValue))
+                return null;
+
+            var dir = Path.GetDirectoryName(tjaFilePath);
+            var wavePath = Path.Combine(dir, waveValue);
+            if (File.Exists(wavePath))
+                return wavePath;
+
+            // Fallback: try audio file with same base name as TJA
+            var tjaBase = Path.GetFileNameWithoutExtension(tjaFilePath);
+            foreach (var ext in new[] { ".ogg", ".wav", ".mp3", ".flac" })
+            {
+                var fallback = Path.Combine(dir, tjaBase + ext);
+                if (File.Exists(fallback))
+                    return fallback;
+            }
+
+            return wavePath;
+        }
+
+        private static string ReadTjaText(string filePath)
+        {
+            var text = FolderMetadataResolver.ReadTextWithDetection(filePath, out var encodingUsed, out var byteCount);
+            FolderMetadataResolver.Trace($"ReadTjaText: path={filePath}, bytes={byteCount}, encoding={encodingUsed}");
+            return text;
         }
     }
 
