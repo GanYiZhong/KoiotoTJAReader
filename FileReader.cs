@@ -17,6 +17,11 @@ namespace ZhongTaiko.TJAReader
         private static int _cacheWriteCounter = 0;
         private const int CACHE_WRITE_INTERVAL = 20; // Save cache every 20 files
 
+        // Async pre-loader: Warms cache for entire folder in background
+        private static readonly Dictionary<string, System.Threading.Tasks.Task> _folderPreloadTasks = new Dictionary<string, System.Threading.Tasks.Task>();
+        private static readonly object _preloadLock = new object();
+        private static string _lastFolderPath = null;
+
         public string Name => "TJA Reader";
 
         public string[] Creator => new string[] { "ZhongTaiko" };
@@ -29,6 +34,96 @@ namespace ZhongTaiko.TJAReader
         public string[] GetExtensions()
         {
             return new string[] { ".tja" };
+        }
+
+        /// <summary>
+        /// Async pre-loader: Detects folder loads and warms cache in background.
+        /// When Koioto starts loading a folder, spawns background task to pre-load all files.
+        /// Koioto's serial GetSelectable() calls then hit warm cache (0ms).
+        /// </summary>
+        private static void TryStartFolderPreload(string filePath)
+        {
+            var currentFolder = Path.GetDirectoryName(filePath);
+
+            lock (_preloadLock)
+            {
+                // Skip if already preloading this folder
+                if (_lastFolderPath == currentFolder)
+                    return;
+
+                _lastFolderPath = currentFolder;
+
+                // Cleanup old tasks
+                foreach (var old in _folderPreloadTasks.Where(kvp => !Directory.Exists(kvp.Key)).ToList())
+                    _folderPreloadTasks.Remove(old.Key);
+
+                if (_folderPreloadTasks.ContainsKey(currentFolder))
+                    return; // Already preloading
+
+                // Start async pre-load for this folder
+                var task = System.Threading.Tasks.Task.Run(() => PreloadFolderAsync(currentFolder));
+                _folderPreloadTasks[currentFolder] = task;
+                FolderMetadataResolver.Trace($"[Preload] Started async pre-load for {currentFolder}");
+            }
+        }
+
+        /// <summary>
+        /// Enumerates all .tja files in folder and caches them in parallel.
+        /// Runs in background thread; results are used by subsequent GetSelectable() calls.
+        /// </summary>
+        private static void PreloadFolderAsync(string folderPath)
+        {
+            try
+            {
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                var tjaFiles = Directory.EnumerateFiles(folderPath, "*.tja", SearchOption.AllDirectories).ToArray();
+
+                if (tjaFiles.Length == 0)
+                    return;
+
+                FolderMetadataResolver.Trace($"[Preload] Found {tjaFiles.Length} TJA files, pre-caching in background...");
+
+                // Pre-load all files in parallel
+                var options = new System.Threading.Tasks.ParallelOptions
+                {
+                    MaxDegreeOfParallelism = System.Environment.ProcessorCount / 2 // Use 50% of cores to avoid slowing UI
+                };
+
+                System.Threading.Tasks.Parallel.ForEach(tjaFiles, options, filePath =>
+                {
+                    if (string.IsNullOrEmpty(filePath))
+                        return;
+
+                    // Skip if cache is still valid
+                    if (_cache.IsCacheValid(filePath))
+                        return;
+
+                    try
+                    {
+                        var tjaText = ReadTjaText(filePath);
+                        var parser = new TJAParser(tjaText);
+                        var metadata = parser.GetMetadata();
+                        var courses = parser.GetCourses();
+
+                        if (courses.Length > 0)
+                        {
+                            _cache.CacheMetadata(filePath, courses, metadata);
+                        }
+                    }
+                    catch
+                    {
+                        // Ignore errors during pre-load; GetSelectable() will handle them normally
+                    }
+                });
+
+                sw.Stop();
+                _cache.Save();
+                FolderMetadataResolver.Trace($"[Preload] Complete: {tjaFiles.Length} files in {sw.ElapsedMilliseconds}ms");
+            }
+            catch (Exception ex)
+            {
+                FolderMetadataResolver.Trace($"[Preload] Error: {ex.Message}");
+            }
         }
 
         /// <summary>
@@ -64,6 +159,9 @@ namespace ZhongTaiko.TJAReader
         {
             try
             {
+                // Trigger async pre-loader when folder starts loading
+                TryStartFolderPreload(filePath);
+
                 var sw = System.Diagnostics.Stopwatch.StartNew();
                 FolderMetadataResolver.Trace($"GetSelectable start: filePath={filePath}");
 
