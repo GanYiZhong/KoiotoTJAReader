@@ -30,6 +30,10 @@ namespace ZhongTaiko.TJAReader
         // Cache detected encodings to avoid redundant detection on repeated reads
         private static readonly Dictionary<string, string> EncodingCache = new Dictionary<string, string>();
 
+        // Cache folder metadata to avoid re-reading folder.json/genre.ini/box.def for every file in same folder
+        private static readonly Dictionary<string, FolderMetadata> FolderMetadataCache = new Dictionary<string, FolderMetadata>();
+        private static readonly object FolderMetadataCacheLock = new object();
+
         static FolderMetadataResolver()
         {
             try
@@ -146,17 +150,33 @@ namespace ZhongTaiko.TJAReader
 
         public static FolderMetadata Resolve(string tjaFilePath)
         {
+            // Walk UP to find parent folder containing genre.ini/box.def
+            // TJA files may be in subfolders, but metadata files are in parent
+            var currentFolder = Path.GetDirectoryName(tjaFilePath);
+            var parentFolder = Path.GetDirectoryName(currentFolder);
+
+            // Check cache first - significantly reduces I/O on folder with many files
+            lock (FolderMetadataCacheLock)
+            {
+                if (FolderMetadataCache.ContainsKey(currentFolder))
+                {
+                    Trace($"Resolve cache hit: currentFolder={currentFolder}");
+                    return FolderMetadataCache[currentFolder];
+                }
+                if (!string.IsNullOrEmpty(parentFolder) && FolderMetadataCache.ContainsKey(parentFolder))
+                {
+                    Trace($"Resolve cache hit: parentFolder={parentFolder}");
+                    return FolderMetadataCache[parentFolder];
+                }
+            }
+
             var metadata = new FolderMetadata();
 
             try
             {
-                // Walk UP to find parent folder containing genre.ini/box.def
-                // TJA files may be in subfolders, but metadata files are in parent
-                var currentFolder = Path.GetDirectoryName(tjaFilePath);
-                var parentFolder = Path.GetDirectoryName(currentFolder);
-
                 Trace($"Resolve start: TJA={tjaFilePath}");
                 Trace($"Resolve folders: current={currentFolder ?? "<null>"}, parent={parentFolder ?? "<null>"}");
+                Trace($"Resolve cache miss - reading folder metadata");
 
                 // Try current folder first, then parent folder
                 var searchFolders = new[] { currentFolder, parentFolder };
@@ -252,6 +272,15 @@ namespace ZhongTaiko.TJAReader
 
                 Trace(
                     $"Resolve complete: Name={metadata.Name ?? "<null>"}, Description={metadata.Description ?? "<null>"}, Albumart={metadata.Albumart ?? "<null>"}, GenreName={metadata.GenreName ?? "<null>"}");
+
+                // Cache result for this folder
+                lock (FolderMetadataCacheLock)
+                {
+                    if (!FolderMetadataCache.ContainsKey(currentFolder))
+                        FolderMetadataCache[currentFolder] = metadata;
+                    if (!string.IsNullOrEmpty(parentFolder) && !FolderMetadataCache.ContainsKey(parentFolder) && !metadata.Name.Equals(currentFolder))
+                        FolderMetadataCache[parentFolder] = metadata;
+                }
             }
             catch (Exception ex)
             {

@@ -33,45 +33,38 @@ namespace ZhongTaiko.TJAReader
         {
             try
             {
+                var sw = System.Diagnostics.Stopwatch.StartNew();
                 FolderMetadataResolver.Trace($"GetSelectable start: filePath={filePath}");
 
-                TJAMetadata metadata = null;
-                TJACourse[] courses = null;
+                // Always parse TJA for metadata (fast string parsing)
+                // Only cache/skip CourseParser, not TJAParser
+                var swRead = System.Diagnostics.Stopwatch.StartNew();
+                var tjaText = ReadTjaText(filePath);
+                swRead.Stop();
 
-                // Check cache FIRST - skip parse if valid
-                if (_cache.IsCacheValid(filePath))
+                var swParse = System.Diagnostics.Stopwatch.StartNew();
+                var parser = new TJAParser(tjaText);
+                var metadata = parser.GetMetadata();
+                var courses = parser.GetCourses();
+                swParse.Stop();
+
+                // Cache courses for later (skip expensive CourseParser)
+                if (courses.Length > 0)
                 {
-                    FolderMetadataResolver.Trace($"[Cache HIT] Skipping parse for {filePath}");
-                    var cachedCourses = _cache.GetCachedCourses(filePath);
-                    if (cachedCourses != null && cachedCourses.Count > 0)
-                    {
-                        metadata = new TJAMetadata();
-                        courses = cachedCourses.Values.ToArray();
-                    }
-                }
-
-                // If cache miss, parse the file
-                if (metadata == null || courses == null || courses.Length == 0)
-                {
-                    FolderMetadataResolver.Trace($"[Cache MISS] Parsing {filePath}");
-                    var tjaText = ReadTjaText(filePath);
-                    var parser = new TJAParser(tjaText);
-                    metadata = parser.GetMetadata();
-                    courses = parser.GetCourses();
-
-                    if (courses.Length > 0)
-                    {
-                        _cache.CacheMetadata(filePath, courses);
-                    }
+                    _cache.CacheMetadata(filePath, courses);
+                    FolderMetadataResolver.Trace($"[Cache] Updated for {filePath}");
                 }
 
                 if (courses.Length == 0)
                 {
+                    FolderMetadataResolver.Trace($"GetSelectable: no courses found in {filePath}");
                     return null;
                 }
 
                 // Resolve folder metadata (genre.ini, box.def, folder.json)
+                var swFolder = System.Diagnostics.Stopwatch.StartNew();
                 var folderMeta = FolderMetadataResolver.Resolve(filePath);
+                swFolder.Stop();
                 FolderMetadataResolver.Trace(
                     $"GetSelectable folderMeta after Resolve: Name={folderMeta?.Name ?? "<null>"}, Description={folderMeta?.Description ?? "<null>"}, Albumart={folderMeta?.Albumart ?? "<null>"}, GenreName={folderMeta?.GenreName ?? "<null>"}");
 
@@ -100,8 +93,9 @@ namespace ZhongTaiko.TJAReader
                     result[GetCoursesFromString(course.Difficulty)] = diff;
                 }
 
+                sw.Stop();
                 FolderMetadataResolver.Trace(
-                    $"GetSelectable complete: Title={result.Title ?? "<null>"}, AlbumartPath={result.AlbumartPath ?? "<null>"}, GenreName(unmapped)={folderMeta?.GenreName ?? "<null>"}");
+                    $"GetSelectable complete: Title={result.Title ?? "<null>"}, AlbumartPath={result.AlbumartPath ?? "<null>"}, GenreName(unmapped)={folderMeta?.GenreName ?? "<null>"} [Read={swRead.ElapsedMilliseconds}ms, Parse={swParse.ElapsedMilliseconds}ms, Folder={swFolder.ElapsedMilliseconds}ms, Total={sw.ElapsedMilliseconds}ms]");
 
                 return result;
             }
